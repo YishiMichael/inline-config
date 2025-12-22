@@ -1,5 +1,5 @@
 inline_config::config! {
-    pub static CA = "Cargo.toml" + toml!(r#"
+    pub static MY_CONFIG = "Cargo.toml" + toml!(r#"
         name = "override"
     "#) + json!(r#"
     {
@@ -16,9 +16,9 @@ inline_config::config! {
     }"#);
 }
 
-use inline_config::{key, ConfigData, Get};
+use inline_config::{key, Config, Get};
 
-#[derive(ConfigData, Debug)]
+#[derive(Config, Debug)]
 #[allow(unused)]
 struct MyS {
     name: &'static str,
@@ -27,8 +27,10 @@ struct MyS {
 }
 
 fn main() {
-    let w: MyS = CA.get(key!("inner"));
-    println!("{:?}", w);
-    let w: MyS = CA.get(key!(""));
-    println!("{:?}", w);
+    let v: MyS = MY_CONFIG.get(key!("inner"));
+    println!("{:?}", v);
+    let v: (&str, &str, Vec<String>) = MY_CONFIG.get(key!("inner"));
+    println!("{:?}", v);
+    let v: MyS = MY_CONFIG.get(key!(""));
+    println!("{:?}", v);
 }

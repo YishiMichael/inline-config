@@ -33,7 +33,7 @@ pub fn Key(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 #[proc_macro_error::proc_macro_error]
-#[proc_macro_derive(ConfigData)]
-pub fn config_data(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(convert::config_data, input)
+#[proc_macro_derive(Config)]
+pub fn config_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    delegate_macro(convert::config_derive, input)
 }

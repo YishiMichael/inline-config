@@ -116,66 +116,51 @@ struct ConfigItemCollector {
 impl ConfigItemCollector {
     fn from_value(value: Value, ident: &syn::Ident, vis: &syn::Visibility) -> Self {
         match value.kind {
-            ValueKind::Nil => Self::from_nil(),
-            ValueKind::Boolean(value) => Self::from_bool(value),
-            ValueKind::I64(value) => Self::from_integer(value),
-            ValueKind::I128(value) => Self::from_integer(value as i64),
-            ValueKind::U64(value) => Self::from_integer(value as i64),
-            ValueKind::U128(value) => Self::from_integer(value as i64),
-            ValueKind::Float(value) => Self::from_float(value),
-            ValueKind::String(value) => Self::from_string(value),
-            ValueKind::Table(value) => Self::from_table(value, ident, vis),
-            ValueKind::Array(value) => Self::from_array(value, ident, vis),
+            ValueKind::Nil => {
+                Self::from_primitive(syn::parse_quote! { () }, syn::parse_quote! { () })
+            }
+            ValueKind::Boolean(value) => {
+                Self::from_primitive(syn::parse_quote! { bool }, syn::parse_quote! { #value })
+            }
+            ValueKind::I64(value) => {
+                Self::from_primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
+            }
+            ValueKind::I128(value) => {
+                Self::from_primitive(syn::parse_quote! { i128 }, syn::parse_quote! { #value })
+            }
+            ValueKind::U64(value) => {
+                Self::from_primitive(syn::parse_quote! { u64 }, syn::parse_quote! { #value })
+            }
+            ValueKind::U128(value) => {
+                Self::from_primitive(syn::parse_quote! { u128 }, syn::parse_quote! { #value })
+            }
+            ValueKind::Float(value) => {
+                Self::from_primitive(syn::parse_quote! { f64 }, syn::parse_quote! { #value })
+            }
+            ValueKind::String(value) => Self::from_primitive(
+                syn::parse_quote! { &'static str },
+                syn::parse_quote! { #value },
+            ),
+            ValueKind::Table(value) => Self::from_container(
+                value.into_iter().map(|(name, value)| {
+                    // let name = quote::format_ident!("{}", name.replace("-", "_")); // TODO: allow -
+                    (Some(name), value)
+                }),
+                ident,
+                vis,
+            ),
+            ValueKind::Array(value) => Self::from_container(
+                value.into_iter().map(|value| {
+                    (
+                        // KeySegment::index_ty(index),
+                        None, // quote::format_ident!("_{index}_"),
+                        value,
+                    )
+                }),
+                ident,
+                vis,
+            ),
         }
-    }
-
-    fn from_nil() -> Self {
-        // TODO: Option?
-        Self::from_primitive(syn::parse_quote! { () }, syn::parse_quote! { () })
-    }
-
-    fn from_bool(value: bool) -> Self {
-        Self::from_primitive(syn::parse_quote! { bool }, syn::parse_quote! { #value })
-    }
-
-    fn from_integer(value: i64) -> Self {
-        Self::from_primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
-    }
-
-    fn from_float(value: f64) -> Self {
-        Self::from_primitive(syn::parse_quote! { f64 }, syn::parse_quote! { #value })
-    }
-
-    fn from_string(value: String) -> Self {
-        Self::from_primitive(
-            syn::parse_quote! { &'static str },
-            syn::parse_quote! { #value },
-        )
-    }
-
-    fn from_table(value: Map<String, Value>, ident: &syn::Ident, vis: &syn::Visibility) -> Self {
-        Self::from_container(
-            value.into_iter().map(|(name, value)| {
-                let name = quote::format_ident!("{}", name.replace("-", "_")); // TODO: allow -
-                (KeySegment::name_ty(name.to_string().as_str()), name, value)
-            }),
-            ident,
-            vis,
-        )
-    }
-
-    fn from_array(value: Vec<Value>, ident: &syn::Ident, vis: &syn::Visibility) -> Self {
-        Self::from_container(
-            value.into_iter().enumerate().map(|(index, value)| {
-                (
-                    KeySegment::index_ty(index),
-                    quote::format_ident!("_{index}_"),
-                    value,
-                )
-            }),
-            ident,
-            vis,
-        )
     }
 
     fn from_primitive(ty: syn::Type, expr: syn::Expr) -> Self {
@@ -189,7 +174,7 @@ impl ConfigItemCollector {
     }
 
     fn from_container(
-        fields: impl Iterator<Item = (syn::Type, syn::Ident, Value)>,
+        fields: impl Iterator<Item = (Option<String>, Value)>,
         ident: &syn::Ident,
         vis: &syn::Visibility,
     ) -> Self {
@@ -199,7 +184,11 @@ impl ConfigItemCollector {
         let mut structs = Vec::new();
         let mut select_impls = Vec::new();
         let mut convert_impls = Vec::new();
-        for (key_segment_ty, field_name, value) in fields {
+        for (index, (name, value)) in fields.enumerate() {
+            let field_name = match name {
+                Some(ref name) => quote::format_ident!("{}", name.replace("-", "_")),
+                None => quote::format_ident!("_{index}_"),
+            };
             let ConfigItemCollector {
                 ty: field_ty,
                 expr: field_expr,
@@ -207,15 +196,20 @@ impl ConfigItemCollector {
                 select_impls: field_select_impls,
                 convert_impls: field_convert_impls,
             } = Self::from_value(value, &quote::format_ident!("{ident}__{field_name}"), vis);
-            select_impls.push(syn::parse_quote! {
-                impl<'c> ::inline_config::__private::Select<'c, #key_segment_ty> for #ident {
-                    type Representation = #field_ty;
+            select_impls.extend(
+                [
+                    Some(KeySegment::index_ty(index)),
+                    name.map(|name| KeySegment::name_ty(name.as_str()))
+                ].into_iter().filter_map(std::convert::identity).map(|key_segment_ty| syn::parse_quote! {
+                    impl<'c> ::inline_config::__private::Select<'c, #key_segment_ty> for #ident {
+                        type Representation = #field_ty;
 
-                    fn select(&'c self, _key_segment: #key_segment_ty) -> &'c Self::Representation {
-                        &self.#field_name
+                        fn select(&'c self, _key_segment: #key_segment_ty) -> &'c Self::Representation {
+                            &self.#field_name
+                        }
                     }
-                }
-            });
+                })
+            );
             fields_name.push(field_name);
             fields_ty.push(field_ty);
             fields_expr.push(field_expr);
@@ -223,7 +217,7 @@ impl ConfigItemCollector {
             select_impls.extend(field_select_impls);
             convert_impls.extend(field_convert_impls);
         }
-        convert_impls.extend(convert::representation_into_container(
+        convert_impls.extend(convert::representation_into_containers(
             ident,
             &fields_name,
             &fields_ty,

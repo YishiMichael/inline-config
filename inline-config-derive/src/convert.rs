@@ -1,10 +1,10 @@
 use super::key::KeySegment;
 
-pub(crate) fn config_data(input: syn::ItemStruct) -> syn::ItemImpl {
-    config_data_from_representation(&input.ident, &input.generics, &input.fields)
+pub(crate) fn config_derive(input: syn::ItemStruct) -> syn::ItemImpl {
+    struct_from_representaiton(&input.ident, &input.generics, &input.fields)
 }
 
-fn config_data_from_representation(
+fn struct_from_representaiton(
     ident: &syn::Ident,
     struct_generics: &syn::Generics,
     fields: &syn::Fields,
@@ -102,11 +102,11 @@ fn config_data_from_representation(
     }
 }
 
-pub(crate) fn representation_into_container(
+pub(crate) fn representation_into_containers(
     ident: &syn::Ident,
     fields_name: &[syn::Ident],
     fields_ty: &[syn::Type],
-) -> [syn::ItemImpl; 3] {
+) -> Vec<syn::ItemImpl> {
     let count = fields_name.len();
     let lifetime = syn::Lifetime::new("'__r", proc_macro2::Span::call_site());
     let generic = syn::Ident::new("__T", proc_macro2::Span::call_site());
@@ -156,5 +156,5 @@ pub(crate) fn representation_into_container(
                 }
             }
         },
-    ]
+    ].into()
 }

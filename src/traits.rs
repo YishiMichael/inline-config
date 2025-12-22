@@ -95,6 +95,24 @@ macro_rules! numeric_convert {
                 }
             }
 
+            impl ConvertInto<'_, $target> for i128 {
+                fn into(&self) -> $target {
+                    *self as $target
+                }
+            }
+
+            impl ConvertInto<'_, $target> for u64 {
+                fn into(&self) -> $target {
+                    *self as $target
+                }
+            }
+
+            impl ConvertInto<'_, $target> for u128 {
+                fn into(&self) -> $target {
+                    *self as $target
+                }
+            }
+
             impl ConvertInto<'_, $target> for f64 {
                 fn into(&self) -> $target {
                     *self as $target
@@ -113,41 +131,3 @@ where
         <T as ConvertFrom<'r, R>>::from(self)
     }
 }
-
-// include!(concat!(env!("OUT_DIR"), "/representation_tuples_impl.rs"));
-
-// impl ConvertInto<RepresentationEmptyArray> for () {
-//     fn into(_representation: &RepresentationEmptyArray) -> Self {
-//         ()
-//     }
-// }
-
-// impl<T> ConvertInto<RepresentationEmptyArray> for [T; 0] {
-//     fn into(_representation: &RepresentationEmptyArray) -> Self {
-//         []
-//     }
-// }
-
-// impl<T> ConvertInto<RepresentationEmptyArray> for Vec<T> {
-//     fn into(_representation: &RepresentationEmptyArray) -> Self {
-//         Vec::new()
-//     }
-// }
-
-// impl<R, T, const N: usize> ConvertInto<RepresentationArray<R, N>> for [T; N]
-// where
-//     T: ConvertInto<R>,
-// {
-//     fn into(representation: &RepresentationArray<R, N>) -> Self {
-//         std::array::from_fn(|i| T::into(&representation.0[i]))
-//     }
-// }
-
-// impl<R, T, const N: usize> ConvertInto<RepresentationArray<R, N>> for Vec<T>
-// where
-//     T: ConvertInto<R>,
-// {
-//     fn into(representation: &RepresentationArray<R, N>) -> Self {
-//         <[T; N]>::into(representation).into()
-//     }
-// }
