@@ -1,0 +1,16 @@
+[workspace]
+resolver = "3"
+members = [
+	".",
+	"inline-config-derive",
+    "examples/basic",
+    "examples/inherited",
+]
+
+[package]
+name = "inline-config"
+version = "0.0.1"
+edition = "2024"
+
+[dependencies]
+inline-config-derive = { path = "inline-config-derive" }

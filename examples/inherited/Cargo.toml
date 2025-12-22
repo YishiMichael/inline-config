@@ -1,0 +1,9 @@
+[package]
+name = "inherited"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+basic = { path = "../basic" }
+inline-config = { path = "../.." }
