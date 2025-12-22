@@ -53,7 +53,7 @@ pub(crate) fn config_data(input: syn::ItemStruct) -> proc_macro2::TokenStream {
             let key_segment_type_ts: Vec<_> = types
                 .iter()
                 .enumerate()
-                .map(|(index, _)| KeySegment::index_type_ts(index))
+                .map(|(index, _)| KeySegment::index_type_ts(index as isize))
                 .collect();
             quote::quote! {
                 impl<#lifetime, #(#struct_generics_params,)* #generic>

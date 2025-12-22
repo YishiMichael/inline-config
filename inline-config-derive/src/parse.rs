@@ -199,7 +199,7 @@ impl ConfigItemCollector {
         Self::from_container(
             value.into_iter().enumerate().map(|(index, value)| {
                 (
-                    KeySegment::index_type_ts(index),
+                    KeySegment::index_type_ts(index as isize),
                     format!("_{index}_"),
                     value,
                 )

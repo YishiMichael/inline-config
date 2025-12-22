@@ -7,10 +7,10 @@ inline_config::config! {
             "name": "json_override",
             "name2": "other"
         }
-    }"#) + json!(r#"
+    }"#) + json5!(r#"
     {
         "name": "json_override",
-        "name2": "out_name2"
+        "name2": "out_name2",
     }"#);
 }
 
@@ -24,8 +24,8 @@ struct MyS {
 }
 
 fn main() {
-    let w: MyS = C.get(key!(inner));
+    let w: MyS = C.get(key!(" innerrrr [-1 ] .a "));
     println!("{:?}", w);
-    let w: MyS = C.get(key!());
+    let w: MyS = C.get(key!(""));
     println!("{:?}", w);
 }

@@ -29,7 +29,7 @@ pub trait Select<'c, KS> {
 pub struct KeySegmentName<const H: u64>;
 
 #[derive(Default)]
-pub struct KeySegmentIndex<const I: usize>;
+pub struct KeySegmentIndex<const I: isize>;
 
 #[derive(Default)]
 pub struct KeyNil;
