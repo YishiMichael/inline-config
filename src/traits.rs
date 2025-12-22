@@ -29,7 +29,7 @@ pub trait Select<'c, KS> {
 pub struct KeySegmentName<const H: u64>;
 
 #[derive(Default)]
-pub struct KeySegmentIndex<const I: isize>;
+pub struct KeySegmentIndex<const I: usize>;
 
 #[derive(Default)]
 pub struct KeyNil;
@@ -60,58 +60,6 @@ where
     }
 }
 
-// impl<'c, C, KSS, const I: usize> Access<'c, Cons<KeySegmentIndex<I>, KSS>> for C
-// where
-//     C: Access<'c, KeySegmentIndex<I>>,
-//     C::Representation: Access<'c, KSS>,
-// {
-//     type Representation = <C::Representation as Access<'c, KSS>>::Representation;
-
-//     fn access(&'c self, key: Cons<KeySegmentIndex<I>, KSS>) -> &'c Self::Representation {
-//         <C::Representation as Access<'c, KSS>>::access(
-//             <C as Access<'c, KeySegmentIndex<I>>>::access(self, key.0),
-//             key.1,
-//         )
-//     }
-// }
-
-// #[doc(hidden)]
-// pub mod __representation_types {
-//     pub struct Nil;
-
-//     pub struct Bool(pub bool);
-
-//     pub struct StaticStr(pub &'static str);
-
-//     pub enum Number {
-//         Integer(i64),
-//         Float(f64),
-//     }
-// }
-
-// #[doc(hidden)]
-// pub const MAX_TUPLE_ARITY: usize = 16;
-
-// struct MyC {
-//     a: i64,
-//     b: String,
-// }
-
-// impl<'c, R> crate::__private::ConvertInto<'c, MyC> for R
-// where
-//     R: crate::__private::Access<'c, usize>,
-//     <R as crate::__private::Access<'c, usize>>::Representation: crate::__private::ConvertInto<'c, i64>,
-//     R: crate::__private::Access<'c, ()>,
-//     <R as crate::__private::Access<'c, ()>>::Representation: crate::__private::ConvertInto<'c, String>,
-// {
-//     fn into(&'c self) -> MyC {
-//         MyC {
-//             a: self.access(<usize>::default()).into(),
-//             b: self.access(<()>::default()).into(),
-//         }
-//     }
-// }
-
 pub trait ConvertInto<'r, T> {
     fn into(&'r self) -> T;
 }
@@ -119,41 +67,6 @@ pub trait ConvertInto<'r, T> {
 pub trait ConvertFrom<'r, R> {
     fn from(representation: &'r R) -> Self;
 }
-
-// pub struct Nil;
-
-// pub struct Bool(pub bool);
-
-// pub struct StaticStr(pub &'static str);
-
-// pub enum Number {
-//     Integer(i64),
-//     Float(f64),
-// }
-
-// use super::access::__representation_types::{Bool, Nil, Number, StaticStr};
-
-// impl<'c, R, P, C> Access<'c, Cons<R, P>> for C
-// where
-//     C: Access<'c, R>,
-//     C::Representation: Access<'c, P>,
-// {
-//     type Representation = <C::Representation as Access<'c, P>>::Representation;
-
-//     fn access(&'c self, key: Cons<R, P>) -> &'c Self::Representation {
-//         self.access(key.root).access(key.postfix)
-//     }
-// }
-
-// impl<T> ConvertInto<'_, T> for ()
-// // TODO
-// where
-//     T: Default,
-// {
-//     fn into(&self) -> T {
-//         T::default()
-//     }
-// }
 
 impl ConvertInto<'_, bool> for bool {
     fn into(&self) -> bool {
@@ -174,22 +87,22 @@ impl ConvertInto<'_, String> for &'static str {
 }
 
 macro_rules! numeric_convert {
-        ($($target:ty),*) => {
-            $(
-                impl ConvertInto<'_, $target> for i64 {
-                    fn into(&self) -> $target {
-                        *self as $target
-                    }
+    ($($target:ty),*) => {
+        $(
+            impl ConvertInto<'_, $target> for i64 {
+                fn into(&self) -> $target {
+                    *self as $target
                 }
+            }
 
-                impl ConvertInto<'_, $target> for f64 {
-                    fn into(&self) -> $target {
-                        *self as $target
-                    }
+            impl ConvertInto<'_, $target> for f64 {
+                fn into(&self) -> $target {
+                    *self as $target
                 }
-            )*
-        };
-    }
+            }
+        )*
+    };
+}
 numeric_convert!(i32, i64, i128, isize, u32, u64, u128, usize, f32, f64);
 
 impl<'r, R, T> ConvertInto<'r, T> for R

@@ -1,3 +1,4 @@
+use super::convert;
 use super::key::KeySegment;
 use config::{File, FileFormat, Map, Source, Value, ValueKind};
 
@@ -105,15 +106,15 @@ fn parse_value(sources: impl IntoIterator<Item = ConfigSource>) -> Value {
 }
 
 struct ConfigItemCollector {
-    type_ts: proc_macro2::TokenStream,
-    value_ts: proc_macro2::TokenStream,
-    struct_items: Vec<proc_macro2::TokenStream>,
-    select_impl_items: Vec<proc_macro2::TokenStream>,
-    convert_impl_items: Vec<proc_macro2::TokenStream>,
+    ty: syn::Type,
+    expr: syn::Expr,
+    structs: Vec<syn::ItemStruct>,
+    select_impls: Vec<syn::ItemImpl>,
+    convert_impls: Vec<syn::ItemImpl>,
 }
 
 impl ConfigItemCollector {
-    fn from_value(value: Value, type_name: &str, vis: &syn::Visibility) -> Self {
+    fn from_value(value: Value, ident: &syn::Ident, vis: &syn::Visibility) -> Self {
         match value.kind {
             ValueKind::Nil => Self::from_nil(),
             ValueKind::Boolean(value) => Self::from_bool(value),
@@ -123,160 +124,125 @@ impl ConfigItemCollector {
             ValueKind::U128(value) => Self::from_integer(value as i64),
             ValueKind::Float(value) => Self::from_float(value),
             ValueKind::String(value) => Self::from_string(value),
-            ValueKind::Table(value) => Self::from_table(value, type_name, vis),
-            ValueKind::Array(value) => Self::from_array(value, type_name, vis),
+            ValueKind::Table(value) => Self::from_table(value, ident, vis),
+            ValueKind::Array(value) => Self::from_array(value, ident, vis),
         }
     }
 
     fn from_nil() -> Self {
         // TODO: Option?
-        Self::from_primitive(
-            quote::quote! {
-                ()
-            },
-            quote::quote! {
-                ()
-            },
-        )
+        Self::from_primitive(syn::parse_quote! { () }, syn::parse_quote! { () })
     }
 
     fn from_bool(value: bool) -> Self {
-        Self::from_primitive(
-            quote::quote! {
-                bool
-            },
-            quote::quote! {
-                #value
-            },
-        )
+        Self::from_primitive(syn::parse_quote! { bool }, syn::parse_quote! { #value })
     }
 
     fn from_integer(value: i64) -> Self {
-        Self::from_primitive(
-            quote::quote! {
-                i64
-            },
-            quote::quote! {
-                #value
-            },
-        )
+        Self::from_primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
     }
 
     fn from_float(value: f64) -> Self {
-        Self::from_primitive(
-            quote::quote! {
-                f64
-            },
-            quote::quote! {
-                #value
-            },
-        )
+        Self::from_primitive(syn::parse_quote! { f64 }, syn::parse_quote! { #value })
     }
 
     fn from_string(value: String) -> Self {
         Self::from_primitive(
-            quote::quote! {
-                &'static str
-            },
-            quote::quote! {
-                #value
-            },
+            syn::parse_quote! { &'static str },
+            syn::parse_quote! { #value },
         )
     }
 
-    fn from_table(value: Map<String, Value>, type_name: &str, vis: &syn::Visibility) -> Self {
+    fn from_table(value: Map<String, Value>, ident: &syn::Ident, vis: &syn::Visibility) -> Self {
         Self::from_container(
             value.into_iter().map(|(name, value)| {
-                let name = name.replace("-", "_"); // TODO: allow -
-                (KeySegment::name_type_ts(name.as_str()), name, value)
+                let name = quote::format_ident!("{}", name.replace("-", "_")); // TODO: allow -
+                (KeySegment::name_ty(name.to_string().as_str()), name, value)
             }),
-            type_name,
+            ident,
             vis,
         )
     }
 
-    fn from_array(value: Vec<Value>, type_name: &str, vis: &syn::Visibility) -> Self {
+    fn from_array(value: Vec<Value>, ident: &syn::Ident, vis: &syn::Visibility) -> Self {
         Self::from_container(
             value.into_iter().enumerate().map(|(index, value)| {
                 (
-                    KeySegment::index_type_ts(index as isize),
-                    format!("_{index}_"),
+                    KeySegment::index_ty(index),
+                    quote::format_ident!("_{index}_"),
                     value,
                 )
             }),
-            type_name,
+            ident,
             vis,
         )
     }
 
-    fn from_primitive(
-        type_ts: proc_macro2::TokenStream,
-        value_ts: proc_macro2::TokenStream,
-    ) -> Self {
+    fn from_primitive(ty: syn::Type, expr: syn::Expr) -> Self {
         Self {
-            type_ts,
-            value_ts,
-            struct_items: Vec::new(),
-            select_impl_items: Vec::new(),
-            convert_impl_items: Vec::new(),
+            ty,
+            expr,
+            structs: Vec::new(),
+            select_impls: Vec::new(),
+            convert_impls: Vec::new(),
         }
     }
 
     fn from_container(
-        fields: impl Iterator<Item = (proc_macro2::TokenStream, String, Value)>,
-        type_name: &str,
+        fields: impl Iterator<Item = (syn::Type, syn::Ident, Value)>,
+        ident: &syn::Ident,
         vis: &syn::Visibility,
     ) -> Self {
-        let type_ident = syn::Ident::new(type_name, proc_macro2::Span::call_site());
-        let type_ts = quote::quote! { #type_ident };
-        let mut names = Vec::new();
-        let mut fields_type_ts = Vec::new();
-        let mut fields_value_ts = Vec::new();
-        let mut struct_items = Vec::new();
-        let mut select_impl_items = Vec::new();
-        let mut convert_impl_items = Vec::new();
-        for (key_segment_type_ts, name, value) in fields {
+        let mut fields_name = Vec::new();
+        let mut fields_ty = Vec::new();
+        let mut fields_expr = Vec::new();
+        let mut structs = Vec::new();
+        let mut select_impls = Vec::new();
+        let mut convert_impls = Vec::new();
+        for (key_segment_ty, field_name, value) in fields {
             let ConfigItemCollector {
-                type_ts: field_type_ts,
-                value_ts: field_value_ts,
-                struct_items: field_struct_items,
-                select_impl_items: field_select_impl_items,
-                convert_impl_items: field_convert_impl_items,
-            } = Self::from_value(value, format!("{type_name}__{name}").as_str(), vis);
-            let name = syn::Ident::new(name.as_str(), proc_macro2::Span::call_site());
-            select_impl_items.push(quote::quote! {
-                impl<'c> ::inline_config::__private::Select<'c, #key_segment_type_ts> for #type_ts {
-                    type Representation = #field_type_ts;
+                ty: field_ty,
+                expr: field_expr,
+                structs: field_structs,
+                select_impls: field_select_impls,
+                convert_impls: field_convert_impls,
+            } = Self::from_value(value, &quote::format_ident!("{ident}__{field_name}"), vis);
+            select_impls.push(syn::parse_quote! {
+                impl<'c> ::inline_config::__private::Select<'c, #key_segment_ty> for #ident {
+                    type Representation = #field_ty;
 
-                    fn select(&'c self, _key_segment: #key_segment_type_ts) -> &'c Self::Representation {
-                        &self.#name
+                    fn select(&'c self, _key_segment: #key_segment_ty) -> &'c Self::Representation {
+                        &self.#field_name
                     }
                 }
             });
-            names.push(name);
-            fields_type_ts.push(field_type_ts);
-            fields_value_ts.push(field_value_ts);
-            struct_items.extend(field_struct_items);
-            select_impl_items.extend(field_select_impl_items);
-            convert_impl_items.extend(field_convert_impl_items);
+            fields_name.push(field_name);
+            fields_ty.push(field_ty);
+            fields_expr.push(field_expr);
+            structs.extend(field_structs);
+            select_impls.extend(field_select_impls);
+            convert_impls.extend(field_convert_impls);
         }
-        // convert_impl_items.push(quote::quote! {});
-        struct_items.push(quote::quote! {
-            #vis struct #type_ts {
-                #(#names: #fields_type_ts,)*
+        convert_impls.extend(convert::representation_into_container(
+            ident,
+            &fields_name,
+            &fields_ty,
+        ));
+        structs.push(syn::parse_quote! {
+            #vis struct #ident {
+                #(#fields_name: #fields_ty,)*
             }
         });
-        let value_ts = quote::quote! {
-            #type_ts {
-                #(#names: #fields_value_ts,)*
-            }
-        };
         Self {
-            type_ts,
-            value_ts,
-            struct_items,
-            select_impl_items,
-            convert_impl_items,
+            ty: syn::parse_quote! { #ident },
+            expr: syn::parse_quote! {
+                #ident {
+                    #(#fields_name: #fields_expr,)*
+                }
+            },
+            structs,
+            select_impls,
+            convert_impls,
         }
     }
 }
@@ -292,19 +258,25 @@ fn config_item_ts(config_item: ConfigItem) -> proc_macro2::TokenStream {
         semi_token,
     } = config_item;
     let ConfigItemCollector {
-        type_ts,
-        value_ts,
-        struct_items,
-        select_impl_items,
-        convert_impl_items,
-    } = ConfigItemCollector::from_value(parse_value(sources), format!("__{name}").as_str(), &vis);
-    quote::quote! {
+        ty,
+        expr,
+        structs,
+        select_impls,
+        convert_impls,
+    } = ConfigItemCollector::from_value(
+        parse_value(sources),
+        &quote::format_ident!("__{name}"),
+        &vis,
+    );
+    let static_item: syn::ItemStatic = syn::parse_quote! {
         #(#attrs)*
-        #vis #static_token #name: #type_ts #eq_token #value_ts #semi_token
-
-        #(#struct_items)*
-        #(#select_impl_items)*
-        #(#convert_impl_items)*
+        #vis #static_token #name: #ty #eq_token #expr #semi_token
+    };
+    quote::quote! {
+        #static_item
+        #(#structs)*
+        #(#select_impls)*
+        #(#convert_impls)*
     }
 }
 

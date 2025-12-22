@@ -1,41 +1,47 @@
 use super::key::KeySegment;
 
-pub(crate) fn config_data(input: syn::ItemStruct) -> proc_macro2::TokenStream {
-    let lifetime = syn::Lifetime::new("'__c", proc_macro2::Span::call_site());
+pub(crate) fn config_data(input: syn::ItemStruct) -> syn::ItemImpl {
+    config_data_from_representation(&input.ident, &input.generics, &input.fields)
+}
+
+fn config_data_from_representation(
+    ident: &syn::Ident,
+    struct_generics: &syn::Generics,
+    fields: &syn::Fields,
+) -> syn::ItemImpl {
+    let lifetime = syn::Lifetime::new("'__r", proc_macro2::Span::call_site());
     let generic = syn::Ident::new("__R", proc_macro2::Span::call_site());
-    let ident = input.ident;
-    let struct_generics = &input.generics;
-    let struct_generics_params: Vec<_> = input.generics.params.iter().collect();
-    match input.fields {
+    let struct_generics_params = struct_generics.params.iter();
+    match fields {
         syn::Fields::Named(fields_named) => {
-            let (names, types): (Vec<_>, Vec<_>) = fields_named
+            let (fields_name, fields_ty): (Vec<_>, Vec<_>) = fields_named
                 .named
                 .iter()
                 .map(|field| (field.ident.as_ref().unwrap(), &field.ty))
                 .unzip();
-            let key_segment_type_ts: Vec<_> = names
+            let key_segment_ty: Vec<_> = fields_name
                 .iter()
-                .map(|name| KeySegment::name_type_ts(name.to_string().as_str()))
+                .map(|name| KeySegment::name_ty(name.to_string().as_str()))
                 .collect();
-            quote::quote! {
+            syn::parse_quote! {
                 impl<#lifetime, #(#struct_generics_params,)* #generic>
                     ::inline_config::__private::ConvertFrom<#lifetime, #generic> for #ident #struct_generics
                 where
                     #(
-                        #generic: ::inline_config::__private::Select<#lifetime, #key_segment_type_ts>,
-                        <#generic as ::inline_config::__private::Select<#lifetime, #key_segment_type_ts>>::Representation:
-                            ::inline_config::__private::ConvertInto<#lifetime, #types>,
+                        #generic: ::inline_config::__private::Select<#lifetime, #key_segment_ty>,
+                        <#generic as ::inline_config::__private::Select<#lifetime, #key_segment_ty>>::Representation:
+                            ::inline_config::__private::ConvertInto<#lifetime, #fields_ty>,
                     )*
                 {
                     fn from(representation: &#lifetime #generic) -> #ident #struct_generics {
                         #ident {
-                            #(#names:
+                            #(#fields_name:
                                 <
-                                    <#generic as ::inline_config::__private::Select<#lifetime, #key_segment_type_ts>>::Representation
-                                        as ::inline_config::__private::ConvertInto<#lifetime, #types>
+                                    <#generic as ::inline_config::__private::Select<#lifetime, #key_segment_ty>>::Representation
+                                        as ::inline_config::__private::ConvertInto<#lifetime, #fields_ty>
                                 >::into(
-                                    <#generic as ::inline_config::__private::Select<#lifetime, #key_segment_type_ts>>::select(
-                                        representation, <#key_segment_type_ts>::default()
+                                    <#generic as ::inline_config::__private::Select<#lifetime, #key_segment_ty>>::select(
+                                        representation, <#key_segment_ty>::default()
                                     )
                                 ),
                             )*
@@ -45,35 +51,35 @@ pub(crate) fn config_data(input: syn::ItemStruct) -> proc_macro2::TokenStream {
             }
         }
         syn::Fields::Unnamed(fields_unnamed) => {
-            let types: Vec<_> = fields_unnamed
+            let fields_ty: Vec<_> = fields_unnamed
                 .unnamed
                 .iter()
                 .map(|field| &field.ty)
                 .collect();
-            let key_segment_type_ts: Vec<_> = types
+            let key_segment_ty: Vec<_> = fields_ty
                 .iter()
                 .enumerate()
-                .map(|(index, _)| KeySegment::index_type_ts(index as isize))
+                .map(|(index, _)| KeySegment::index_ty(index))
                 .collect();
-            quote::quote! {
+            syn::parse_quote! {
                 impl<#lifetime, #(#struct_generics_params,)* #generic>
                     ::inline_config::__private::ConvertFrom<#lifetime, #generic> for #ident #struct_generics
                 where
                     #(
-                        #generic: ::inline_config::__private::Select<#lifetime, #key_segment_type_ts>,
-                        <#generic as ::inline_config::__private::Select<#lifetime, #key_segment_type_ts>>::Representation:
-                            ::inline_config::__private::ConvertInto<#lifetime, #types>,
+                        #generic: ::inline_config::__private::Select<#lifetime, #key_segment_ty>,
+                        <#generic as ::inline_config::__private::Select<#lifetime, #key_segment_ty>>::Representation:
+                            ::inline_config::__private::ConvertInto<#lifetime, #fields_ty>,
                     )*
                 {
                     fn from(representation: &#lifetime #generic) -> #ident #struct_generics {
                         #ident(
                             #(
                                 <
-                                    <#generic as ::inline_config::__private::Select<#lifetime, #key_segment_type_ts>>::Representation
-                                        as ::inline_config::__private::ConvertInto<#lifetime, #types>
+                                    <#generic as ::inline_config::__private::Select<#lifetime, #key_segment_ty>>::Representation
+                                        as ::inline_config::__private::ConvertInto<#lifetime, #fields_ty>
                                 >::into(
-                                    <#generic as ::inline_config::__private::Select<#lifetime, #key_segment_type_ts>>::select(
-                                        representation, <#key_segment_type_ts>::default()
+                                    <#generic as ::inline_config::__private::Select<#lifetime, #key_segment_ty>>::select(
+                                        representation, <#key_segment_ty>::default()
                                     )
                                 ),
                             )*
@@ -83,7 +89,7 @@ pub(crate) fn config_data(input: syn::ItemStruct) -> proc_macro2::TokenStream {
             }
         }
         syn::Fields::Unit => {
-            quote::quote! {
+            syn::parse_quote! {
                 impl<#lifetime, #(#struct_generics_params,)* #generic>
                     ::inline_config::__private::ConvertFrom<#lifetime, #generic> for #ident #struct_generics
                 {
@@ -96,22 +102,59 @@ pub(crate) fn config_data(input: syn::ItemStruct) -> proc_macro2::TokenStream {
     }
 }
 
-// struct MyC {
-//     a: i64,
-//     b: String,
-// }
-
-// impl<'c, R> crate::__private::ConvertInto<'c, MyC> for R
-// where
-//     R: crate::__private::Access<'c, usize>,
-//     <R as crate::__private::Access<'c, usize>>::Representation: crate::__private::ConvertInto<'c, i64>,
-//     R: crate::__private::Access<'c, ()>,
-//     <R as crate::__private::Access<'c, ()>>::Representation: crate::__private::ConvertInto<'c, String>,
-// {
-//     fn convert(&'c self) -> MyC {
-//         MyC {
-//             a: self.access(<usize>::default()).convert(),
-//             b: self.access(<()>::default()).convert(),
-//         }
-//     }
-// }
+pub(crate) fn representation_into_container(
+    ident: &syn::Ident,
+    fields_name: &[syn::Ident],
+    fields_ty: &[syn::Type],
+) -> [syn::ItemImpl; 3] {
+    let count = fields_name.len();
+    let lifetime = syn::Lifetime::new("'__r", proc_macro2::Span::call_site());
+    let generic = syn::Ident::new("__T", proc_macro2::Span::call_site());
+    [
+        syn::parse_quote! {
+            impl<#lifetime, #(#fields_name),*>
+                ::inline_config::__private::ConvertInto<#lifetime, (#(#fields_name,)*)> for #ident
+            where
+                #(#fields_ty: ::inline_config::__private::ConvertInto<#lifetime, #fields_name>),*
+            {
+                fn into(&#lifetime self) -> (#(#fields_name,)*) {
+                    (
+                        #(
+                            <#fields_ty as ::inline_config::__private::ConvertInto<#lifetime, #fields_name>>::into(&self.#fields_name),
+                        )*
+                    )
+                }
+            }
+        },
+        syn::parse_quote! {
+            impl<#lifetime, #generic>
+                ::inline_config::__private::ConvertInto<#lifetime, [#generic; #count]> for #ident
+            where
+                #(#fields_ty: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+            {
+                fn into(&#lifetime self) -> [#generic; #count] {
+                    [
+                        #(
+                            <#fields_ty as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::into(&self.#fields_name),
+                        )*
+                    ]
+                }
+            }
+        },
+        syn::parse_quote! {
+            impl<#lifetime, #generic>
+                ::inline_config::__private::ConvertInto<#lifetime, Vec<#generic>> for #ident
+            where
+                #(#fields_ty: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+            {
+                fn into(&#lifetime self) -> Vec<#generic> {
+                    [
+                        #(
+                            <#fields_ty as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::into(&self.#fields_name),
+                        )*
+                    ].into()
+                }
+            }
+        },
+    ]
+}

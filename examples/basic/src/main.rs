@@ -1,16 +1,18 @@
 inline_config::config! {
-    pub static C = "Cargo.toml" + toml!(r#"
+    pub static CA = "Cargo.toml" + toml!(r#"
         name = "override"
     "#) + json!(r#"
     {
         "inner": {
             "name": "json_override",
-            "name2": "other"
+            "name2": "other",
+            "l": ["a", "c", "d"]
         }
     }"#) + json5!(r#"
     {
         "name": "json_override",
         "name2": "out_name2",
+        "l": ["a", "b"],
     }"#);
 }
 
@@ -21,11 +23,12 @@ use inline_config::{key, ConfigData, Get};
 struct MyS {
     name: &'static str,
     name2: String,
+    l: Vec<&'static str>,
 }
 
 fn main() {
-    let w: MyS = C.get(key!(" innerrrr [-1 ] .a "));
+    let w: MyS = CA.get(key!("inner"));
     println!("{:?}", w);
-    let w: MyS = C.get(key!(""));
+    let w: MyS = CA.get(key!(""));
     println!("{:?}", w);
 }

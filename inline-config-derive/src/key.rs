@@ -4,7 +4,7 @@ pub(crate) struct Key(Vec<KeySegment>);
 #[derive(Clone)]
 pub(crate) enum KeySegment {
     Name(String),
-    Index(isize),
+    Index(usize),
 }
 
 mod parse {
@@ -59,29 +59,28 @@ mod parse {
             .parse_next(s)
     }
 
-    fn index(s: &mut &str) -> ModalResult<isize> {
-        (opt('-'), digit1)
-            .take()
+    fn index(s: &mut &str) -> ModalResult<usize> {
+        digit1
             .try_map(FromStr::from_str)
-            .context(StrContext::Expected(StrContextValue::Description("index")))
+            .context(StrContext::Label("index"))
             .parse_next(s)
     }
 }
 
 impl Key {
-    pub(crate) fn type_ts(self) -> proc_macro2::TokenStream {
-        fn recurse(key_segments: &[KeySegment]) -> proc_macro2::TokenStream {
+    pub(crate) fn ty(self) -> syn::Type {
+        fn recurse(key_segments: &[KeySegment]) -> syn::Type {
             if let Some((root, postfix)) = key_segments.split_first() {
-                let root_type_ts = match root {
-                    KeySegment::Name(name) => KeySegment::name_type_ts(name),
-                    KeySegment::Index(index) => KeySegment::index_type_ts(*index),
+                let root_ty = match root {
+                    KeySegment::Name(name) => KeySegment::name_ty(name),
+                    KeySegment::Index(index) => KeySegment::index_ty(*index),
                 };
-                let postfix_type_ts = recurse(postfix);
-                quote::quote! {
-                    ::inline_config::__private::KeyCons<#root_type_ts, #postfix_type_ts>
+                let postfix_ty = recurse(postfix);
+                syn::parse_quote! {
+                    ::inline_config::__private::KeyCons<#root_ty, #postfix_ty>
                 }
             } else {
-                quote::quote! {
+                syn::parse_quote! {
                     ::inline_config::__private::KeyNil
                 }
             }
@@ -89,24 +88,24 @@ impl Key {
         recurse(&self.0)
     }
 
-    pub(crate) fn value_ts(self) -> proc_macro2::TokenStream {
-        let type_ts = self.type_ts();
-        quote::quote! {
-            <#type_ts>::default()
+    pub(crate) fn expr(self) -> syn::Expr {
+        let ty = self.ty();
+        syn::parse_quote! {
+            <#ty>::default()
         }
     }
 }
 
 impl KeySegment {
-    pub(crate) fn name_type_ts(name: &str) -> proc_macro2::TokenStream {
+    pub(crate) fn name_ty(name: &str) -> syn::Type {
         let hash = const_fnv1a_hash::fnv1a_hash_str_64(name);
-        quote::quote! {
+        syn::parse_quote! {
             ::inline_config::__private::KeySegmentName<#hash>
         }
     }
 
-    pub(crate) fn index_type_ts(index: isize) -> proc_macro2::TokenStream {
-        quote::quote! {
+    pub(crate) fn index_ty(index: usize) -> syn::Type {
+        syn::parse_quote! {
             ::inline_config::__private::KeySegmentIndex<#index>
         }
     }
