@@ -1,6 +1,6 @@
+mod config;
 mod convert;
 mod key;
-mod parse;
 
 fn delegate_macro<I, T>(f: fn(I) -> T, input: proc_macro::TokenStream) -> proc_macro::TokenStream
 where
@@ -16,7 +16,7 @@ where
 #[proc_macro_error::proc_macro_error]
 #[proc_macro]
 pub fn config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(parse::config_items_ts, input)
+    delegate_macro(std::convert::identity::<config::ConfigItems>, input)
 }
 
 #[proc_macro_error::proc_macro_error]
@@ -33,7 +33,7 @@ pub fn Key(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 #[proc_macro_error::proc_macro_error]
-#[proc_macro_derive(Config)]
-pub fn config_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(convert::config_derive, input)
+#[proc_macro_derive(ConfigData)]
+pub fn config_data(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    delegate_macro(convert::config_data, input)
 }

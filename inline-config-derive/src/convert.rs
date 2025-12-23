@@ -1,7 +1,147 @@
 use super::key::KeySegment;
 
-pub(crate) fn config_derive(input: syn::ItemStruct) -> syn::ItemImpl {
-    struct_from_representaiton(&input.ident, &input.generics, &input.fields)
+pub(crate) fn select_representation(
+    ident: &syn::Ident,
+    names: &Option<Vec<String>>,
+    fields_ty: &[syn::Type],
+) -> Vec<syn::ItemImpl> {
+    let names: Vec<_> = match names.as_ref() {
+        Some(names) => names.iter().map(Some).collect(),
+        None => fields_ty.iter().map(|_| None).collect(),
+    };
+    names.into_iter().zip(fields_ty).enumerate().flat_map(|(index, (name, field_ty))| {
+        let loc = syn::LitInt::from(proc_macro2::Literal::usize_unsuffixed(index));
+        let impls: Vec<_> = match name {
+            Some(name) => [
+                {
+                    let key_segment_ty = KeySegment::name_ty(name);
+                    syn::parse_quote! {
+                        impl<'c> ::inline_config::__private::Select<'c, #key_segment_ty> for #ident {
+                            type Representation = #field_ty;
+
+                            fn select(&'c self, _key_segment: #key_segment_ty) -> &'c Self::Representation {
+                                &self.#loc
+                            }
+                        }
+                    }
+                },
+                {
+                    let key_segment_ty = KeySegment::index_ty(index);
+                    syn::parse_quote! {
+                        impl<'c> ::inline_config::__private::Select<'c, #key_segment_ty> for #ident {
+                            type Representation = #field_ty;
+
+                            fn select(&'c self, _key_segment: #key_segment_ty) -> &'c Self::Representation {
+                                &self.#loc
+                            }
+                        }
+                    }
+                },
+            ].into(),
+            None => [
+                {
+                    let key_segment_ty = KeySegment::index_ty(index);
+                    syn::parse_quote! {
+                        impl<'c> ::inline_config::__private::Select<'c, #key_segment_ty> for #ident {
+                            type Representation = #field_ty;
+
+                            fn select(&'c self, _key_segment: #key_segment_ty) -> &'c Self::Representation {
+                                &self.#loc
+                            }
+                        }
+                    }
+                },
+            ].into(),
+        };
+        impls
+    }).collect()
+}
+
+pub(crate) fn representation_into_containers(
+    ident: &syn::Ident,
+    names: &Option<Vec<String>>,
+    fields_ty: &[syn::Type],
+) -> Vec<syn::ItemImpl> {
+    let lifetime = syn::Lifetime::new("'__r", proc_macro2::Span::call_site());
+    let locs: Vec<_> = fields_ty
+        .iter()
+        .enumerate()
+        .map(|(index, _)| syn::LitInt::from(proc_macro2::Literal::usize_unsuffixed(index)))
+        .collect();
+    let generics: Vec<_> = fields_ty
+        .iter()
+        .enumerate()
+        .map(|(index, _)| quote::format_ident!("_{index}"))
+        .collect();
+    if names.is_some() {
+        [
+            syn::parse_quote! {
+                impl<#lifetime, #(#generics),*>
+                    ::inline_config::__private::ConvertInto<#lifetime, (#(#generics,)*)> for #ident
+                where
+                    #(#fields_ty: ::inline_config::__private::ConvertInto<#lifetime, #generics>),*
+                {
+                    fn into(&#lifetime self) -> (#(#generics,)*) {
+                        (
+                            #(
+                                <#fields_ty as ::inline_config::__private::ConvertInto<#lifetime, #generics>>::into(&self.#locs),
+                            )*
+                        )
+                    }
+                }
+            },
+        ].into()
+    } else {
+        let generic = syn::Ident::new("__T", proc_macro2::Span::call_site());
+        let count = fields_ty.len();
+        [
+            syn::parse_quote! {
+                impl<#lifetime, #(#generics),*>
+                    ::inline_config::__private::ConvertInto<#lifetime, (#(#generics,)*)> for #ident
+                where
+                    #(#fields_ty: ::inline_config::__private::ConvertInto<#lifetime, #generics>),*
+                {
+                    fn into(&#lifetime self) -> (#(#generics,)*) {
+                        (
+                            #(
+                                <#fields_ty as ::inline_config::__private::ConvertInto<#lifetime, #generics>>::into(&self.#locs),
+                            )*
+                        )
+                    }
+                }
+            },
+            syn::parse_quote! {
+                impl<#lifetime, #generic>
+                    ::inline_config::__private::ConvertInto<#lifetime, [#generic; #count]> for #ident
+                where
+                    #(#fields_ty: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+                {
+                    fn into(&#lifetime self) -> [#generic; #count] {
+                        [
+                            #(
+                                <#fields_ty as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::into(&self.#locs),
+                            )*
+                        ]
+                    }
+                }
+            },
+            syn::parse_quote! {
+                impl<#lifetime, #generic>
+                    ::inline_config::__private::ConvertInto<#lifetime, Vec<#generic>> for #ident
+                where
+                    #(#fields_ty: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+                {
+                    fn into(&#lifetime self) -> Vec<#generic> {
+                        [
+                            #(
+                                <#fields_ty as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::into(&self.#locs),
+                            )*
+                        ].into()
+                    }
+                }
+            },
+        ].into()
+    }
 }
 
 fn struct_from_representaiton(
@@ -102,59 +242,6 @@ fn struct_from_representaiton(
     }
 }
 
-pub(crate) fn representation_into_containers(
-    ident: &syn::Ident,
-    fields_name: &[syn::Ident],
-    fields_ty: &[syn::Type],
-) -> Vec<syn::ItemImpl> {
-    let count = fields_name.len();
-    let lifetime = syn::Lifetime::new("'__r", proc_macro2::Span::call_site());
-    let generic = syn::Ident::new("__T", proc_macro2::Span::call_site());
-    [
-        syn::parse_quote! {
-            impl<#lifetime, #(#fields_name),*>
-                ::inline_config::__private::ConvertInto<#lifetime, (#(#fields_name,)*)> for #ident
-            where
-                #(#fields_ty: ::inline_config::__private::ConvertInto<#lifetime, #fields_name>),*
-            {
-                fn into(&#lifetime self) -> (#(#fields_name,)*) {
-                    (
-                        #(
-                            <#fields_ty as ::inline_config::__private::ConvertInto<#lifetime, #fields_name>>::into(&self.#fields_name),
-                        )*
-                    )
-                }
-            }
-        },
-        syn::parse_quote! {
-            impl<#lifetime, #generic>
-                ::inline_config::__private::ConvertInto<#lifetime, [#generic; #count]> for #ident
-            where
-                #(#fields_ty: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
-            {
-                fn into(&#lifetime self) -> [#generic; #count] {
-                    [
-                        #(
-                            <#fields_ty as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::into(&self.#fields_name),
-                        )*
-                    ]
-                }
-            }
-        },
-        syn::parse_quote! {
-            impl<#lifetime, #generic>
-                ::inline_config::__private::ConvertInto<#lifetime, Vec<#generic>> for #ident
-            where
-                #(#fields_ty: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
-            {
-                fn into(&#lifetime self) -> Vec<#generic> {
-                    [
-                        #(
-                            <#fields_ty as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::into(&self.#fields_name),
-                        )*
-                    ].into()
-                }
-            }
-        },
-    ].into()
+pub(crate) fn config_data(input: syn::ItemStruct) -> syn::ItemImpl {
+    struct_from_representaiton(&input.ident, &input.generics, &input.fields)
 }

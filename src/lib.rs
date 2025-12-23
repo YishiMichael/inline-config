@@ -1,6 +1,6 @@
 mod traits;
 
-pub use inline_config_derive::{config, key, Config, Key};
+pub use inline_config_derive::{config, key, ConfigData, Key};
 pub use traits::Get;
 
 #[doc(hidden)]

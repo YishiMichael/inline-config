@@ -4,7 +4,9 @@ inline_config::config! {
     "#) + json!(r#"
     {
         "inner": {
-            "name": "json_override",
+            "name": {
+                "outer": "json_override"
+            },
             "name2": "other",
             "l": ["a", "c", "d"]
         }
@@ -13,15 +15,25 @@ inline_config::config! {
         "name": "json_override",
         "name2": "out_name2",
         "l": ["a", "b"],
-    }"#);
+    }"#) + toml!(r#"
+        [inner.name]
+        inner = "5"
+    "#);
 }
 
-use inline_config::{key, Config, Get};
+use inline_config::{key, ConfigData, Get};
 
-#[derive(Config, Debug)]
+#[derive(ConfigData, Debug)]
+#[allow(unused)]
+struct MyName {
+    outer: &'static str,
+    inner: String,
+}
+
+#[derive(ConfigData, Debug)]
 #[allow(unused)]
 struct MyS {
-    name: &'static str,
+    name: MyName,
     name2: String,
     l: Vec<&'static str>,
 }
@@ -29,8 +41,10 @@ struct MyS {
 fn main() {
     let v: MyS = MY_CONFIG.get(key!("inner"));
     println!("{:?}", v);
-    let v: (&str, &str, Vec<String>) = MY_CONFIG.get(key!("inner"));
+    let v: ((&str, &str), &str, Vec<String>) = MY_CONFIG.get(key!("inner"));
     println!("{:?}", v);
-    let v: MyS = MY_CONFIG.get(key!(""));
+    // let v: MyS = MY_CONFIG.get(key!(""));
+    // println!("{:?}", v);
+    let v: &str = MY_CONFIG.get(key!("inner.name.inner"));
     println!("{:?}", v);
 }
