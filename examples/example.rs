@@ -37,6 +37,8 @@ config! {
 struct MyName {
     name: &'static str,
     age: u16,
+    #[config_data(rename = "preferred-name")]
+    preferred_name: Option<&'static str>,
 }
 
 // #[derive(ConfigData, Debug)]

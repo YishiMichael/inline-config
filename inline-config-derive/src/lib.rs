@@ -1,4 +1,5 @@
 mod config;
+mod config_data;
 mod path;
 
 fn delegate_macro<I, T>(f: fn(I) -> T, input: proc_macro::TokenStream) -> proc_macro::TokenStream
@@ -32,7 +33,7 @@ pub fn Path(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 }
 
 #[proc_macro_error::proc_macro_error]
-#[proc_macro_derive(ConfigData)]
+#[proc_macro_derive(ConfigData, attributes(config_data))]
 pub fn config_data(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(config::config_data, input)
+    delegate_macro(config_data::config_data, input)
 }

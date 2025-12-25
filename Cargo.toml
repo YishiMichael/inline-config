@@ -3,8 +3,6 @@ resolver = "3"
 members = [
 	".",
 	"inline-config-derive",
-    "examples/basic",
-    "examples/inherited",
 ]
 
 [package]

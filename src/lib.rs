@@ -2,6 +2,8 @@ mod convert;
 mod key;
 mod repr;
 
+pub use inline_config_derive::{config, path, ConfigData, Path};
+
 pub trait Get<'r, Path, AccessPhantom, ConvertPhantom, Type> {
     fn get(&'r self, path: Path) -> Type;
 }
@@ -16,8 +18,6 @@ where
         convert::Convert::convert(self.access_path())
     }
 }
-
-pub use inline_config_derive::{config, path, ConfigData, Path};
 
 #[doc(hidden)]
 pub mod __private {
