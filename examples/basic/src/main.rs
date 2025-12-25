@@ -1,50 +1,66 @@
-inline_config::config! {
-    pub static MY_CONFIG = "Cargo.toml" + toml!(r#"
-        name = "override"
+#![allow(unused)]
+
+use inline_config::{config, path, ConfigData, Get};
+
+config! {
+    pub static MY_CONFIG = toml!(r#"
+        name = "Peter"
+        age = 18
     "#) + json!(r#"
-    {
-        "inner": {
-            "name": {
-                "outer": "json_override"
-            },
-            "name2": "other",
-            "l": ["a", "c", "d"]
+        {
+            "preferred-name": null
         }
-    }"#) + json5!(r#"
-    {
-        "name": "json_override",
-        "name2": "out_name2",
-        "l": ["a", "b"],
-    }"#) + toml!(r#"
-        [inner.name]
-        inner = "5"
     "#);
+    // pub static MY_CONFIG = toml!(r#"
+    //     name = "override"
+    // "#) + json!(r#"
+    // {
+    //     "inner": {
+    //         "name": {
+    //             "outer": "json_override"
+    //         },
+    //         "name2": "other",
+    //         "l": ["a", "c", "d"]
+    //     }
+    // }"#) + json5!(r#"
+    // {
+    //     "name": "json_override",
+    //     "name2": "out_name2",
+    //     "l": ["a", "b"],
+    // }"#) + toml!(r#"
+    //     [inner.name]
+    //     inner = "5"
+    // "#);
 }
 
-use inline_config::{key, ConfigData, Get};
-
 #[derive(ConfigData, Debug)]
-#[allow(unused)]
 struct MyName {
-    outer: &'static str,
-    inner: String,
+    name: &'static str,
+    age: u16,
 }
 
-#[derive(ConfigData, Debug)]
-#[allow(unused)]
-struct MyS {
-    name: MyName,
-    name2: String,
-    l: Vec<&'static str>,
-}
+// #[derive(ConfigData, Debug)]
+// #[allow(unused)]
+// struct MyS {
+//     name: MyName,
+//     name2: String,
+//     l: Vec<&'static str>,
+// }
 
 fn main() {
-    let v: MyS = MY_CONFIG.get(key!("inner"));
+    let v: &str = MY_CONFIG.get(path!("name"));
     println!("{:?}", v);
-    let v: ((&str, &str), &str, Vec<String>) = MY_CONFIG.get(key!("inner"));
+    let v: u32 = MY_CONFIG.get(path!("age"));
     println!("{:?}", v);
+    let v: Option<&str> = MY_CONFIG.get(path!("preferred-name"));
+    println!("{:?}", v);
+    let v: MyName = MY_CONFIG.get(path!(""));
+    println!("{:?}", v);
+    // let v: Option<&str> = MY_CONFIG.get(path!("value"));
+    // let v: ((&str, &str), &str, Vec<String>) = MY_CONFIG.get(key!("inner"));
+    // println!("{:?}", v);
     // let v: MyS = MY_CONFIG.get(key!(""));
     // println!("{:?}", v);
-    let v: &str = MY_CONFIG.get(key!("inner.name.inner"));
-    println!("{:?}", v);
+    // let v: &str = MY_CONFIG.get(key!("inner.name.inner"));
+    // println!("{:?}", v);
 }

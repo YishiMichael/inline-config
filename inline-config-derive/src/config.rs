@@ -1,4 +1,4 @@
-use super::convert;
+use super::path::Key;
 use config::{File, FileFormat, Map, Source, Value, ValueKind};
 
 pub(crate) struct ConfigItems {
@@ -70,27 +70,102 @@ impl quote::ToTokens for ConfigItem {
             Ok(value) => value,
             Err(e) => proc_macro_error::abort_call_site!(e),
         };
-        let ConfigItemCollector {
-            ty,
-            expr,
-            struct_items,
-            select_impls,
-            convert_impls,
-        } = ConfigItemCollector::from_value(value, &quote::format_ident!("__{name}_"), &vis);
+        let (ty, expr) = value_ty_expr(value);
         let static_item: syn::ItemStatic = syn::parse_quote! {
             #(#attrs)*
             #vis #static_token #name: #ty #eq_token #expr #semi_token
         };
         static_item.to_tokens(tokens);
-        struct_items
-            .iter()
-            .for_each(|struct_item| struct_item.to_tokens(tokens));
-        select_impls
-            .iter()
-            .for_each(|select_impl| select_impl.to_tokens(tokens));
-        convert_impls
-            .iter()
-            .for_each(|convert_impl| convert_impl.to_tokens(tokens));
+    }
+}
+
+fn value_ty_expr(value: Value) -> (syn::Type, syn::Expr) {
+    match value.kind {
+        ValueKind::Nil => (
+            syn::parse_quote! { ::inline_config::__private::repr::Nil },
+            syn::parse_quote! { ::inline_config::__private::repr::Nil },
+        ),
+        ValueKind::Boolean(value) => (
+            syn::parse_quote! { ::inline_config::__private::repr::Bool },
+            syn::parse_quote! { ::inline_config::__private::repr::Bool(#value) },
+        ),
+        ValueKind::I64(value) => (
+            syn::parse_quote! { ::inline_config::__private::repr::Integer },
+            syn::parse_quote! { ::inline_config::__private::repr::Integer(#value) },
+        ),
+        ValueKind::I128(value) => {
+            let value = value as i64;
+            (
+                syn::parse_quote! { ::inline_config::__private::repr::Integer },
+                syn::parse_quote! { ::inline_config::__private::repr::Integer(#value) },
+            )
+        }
+        ValueKind::U64(value) => {
+            let value = value as i64;
+            (
+                syn::parse_quote! { ::inline_config::__private::repr::Integer },
+                syn::parse_quote! { ::inline_config::__private::repr::Integer(#value) },
+            )
+        }
+        ValueKind::U128(value) => {
+            let value = value as i64;
+            (
+                syn::parse_quote! { ::inline_config::__private::repr::Integer },
+                syn::parse_quote! { ::inline_config::__private::repr::Integer(#value) },
+            )
+        }
+        ValueKind::Float(value) => (
+            syn::parse_quote! { ::inline_config::__private::repr::Float },
+            syn::parse_quote! { ::inline_config::__private::repr::Float(#value) },
+        ),
+        ValueKind::String(value) => (
+            syn::parse_quote! { ::inline_config::__private::repr::StaticStr },
+            syn::parse_quote! { ::inline_config::__private::repr::StaticStr(#value) },
+        ),
+        ValueKind::Array(value) => value.into_iter().enumerate().rfold((
+            syn::parse_quote! { ::inline_config::__private::repr::HNil },
+            syn::parse_quote! { ::inline_config::__private::repr::HNil },
+        ), |(tail_ty, tail_expr), (index, value)| {
+            let key_ty = Key::index_ty(index);
+            let key_expr = Key::index_expr(index);
+            let (value_ty, value_expr) = value_ty_expr(value);
+            (
+                syn::parse_quote! {
+                    ::inline_config::__private::repr::HCons<::inline_config::__private::repr::Field<#key_ty, #value_ty>, #tail_ty>
+                },
+                syn::parse_quote! {
+                    ::inline_config::__private::repr::HCons {
+                        head: ::inline_config::__private::repr::Field {
+                            key: #key_expr,
+                            value: #value_expr,
+                        },
+                        tail: #tail_expr,
+                    }
+                },
+            )
+        }),
+        ValueKind::Table(value) => value.into_iter().rfold((
+            syn::parse_quote! { ::inline_config::__private::repr::HNil },
+            syn::parse_quote! { ::inline_config::__private::repr::HNil },
+        ), |(tail_ty, tail_expr), (name, value)| {
+            let key_ty = Key::name_ty(name.as_str());
+            let key_expr = Key::name_expr(name.as_str());
+            let (value_ty, value_expr) = value_ty_expr(value);
+            (
+                syn::parse_quote! {
+                    ::inline_config::__private::repr::HCons<::inline_config::__private::repr::Field<#key_ty, #value_ty>, #tail_ty>
+                },
+                syn::parse_quote! {
+                    ::inline_config::__private::repr::HCons {
+                        head: ::inline_config::__private::repr::Field {
+                            key: #key_expr,
+                            value: #value_expr,
+                        },
+                        tail: #tail_expr,
+                    }
+                },
+            )
+        }),
     }
 }
 
@@ -126,101 +201,164 @@ impl syn::parse::Parse for ConfigSource {
     }
 }
 
-struct ConfigItemCollector {
-    ty: syn::Type,
-    expr: syn::Expr,
-    struct_items: Vec<syn::ItemStruct>,
-    select_impls: Vec<syn::ItemImpl>,
-    convert_impls: Vec<syn::ItemImpl>,
-}
-
-impl ConfigItemCollector {
-    fn from_value(value: Value, ident: &syn::Ident, vis: &syn::Visibility) -> Self {
-        match value.kind {
-            ValueKind::Nil => {
-                proc_macro_error::abort_call_site!("cannot handle Nil type");
-                // Self::from_primitive(syn::parse_quote! { () }, syn::parse_quote! { () })
+pub(crate) fn config_data(input: syn::ItemStruct) -> syn::ItemImpl {
+    let ident = &input.ident;
+    let struct_generics = &input.generics;
+    let fields = &input.fields;
+    let generic = syn::Ident::new("__Repr", proc_macro2::Span::call_site());
+    let struct_generics_params = struct_generics.params.iter();
+    match fields {
+        syn::Fields::Named(fields_named) => {
+            let (fields_name, fields_ty): (Vec<_>, Vec<_>) = fields_named
+                .named
+                .iter()
+                .map(|field| (field.ident.as_ref().unwrap(), &field.ty))
+                .unzip();
+            let key_ty: Vec<_> = fields_name
+                .iter()
+                .map(|name| Key::name_ty(name.to_string().as_str()))
+                .collect();
+            let access_phantom_generics: Vec<_> = fields_ty
+                .iter()
+                .enumerate()
+                .map(|(index, _)| quote::format_ident!("__AccessPhantom_{index}"))
+                .collect();
+            let convert_phantom_generics: Vec<_> = fields_ty
+                .iter()
+                .enumerate()
+                .map(|(index, _)| quote::format_ident!("__ConvertPhantom_{index}"))
+                .collect();
+            syn::parse_quote! {
+                impl<
+                    #(#struct_generics_params,)*
+                    #(#access_phantom_generics,)*
+                    #(#convert_phantom_generics,)*
+                    #generic,
+                >
+                    ::inline_config::__private::convert::Convert<
+                        #generic,
+                        (#((#access_phantom_generics, #convert_phantom_generics),)*),
+                    > for #ident #struct_generics
+                where
+                    #(
+                        #generic: ::inline_config::__private::key::AccessKey<
+                            #key_ty,
+                            #access_phantom_generics,
+                        >,
+                        #fields_ty: ::inline_config::__private::convert::Convert<
+                            <#generic as ::inline_config::__private::key::AccessKey<
+                                #key_ty,
+                                #access_phantom_generics,
+                            >>::Repr,
+                            #convert_phantom_generics,
+                        >,
+                    )*
+                {
+                    fn convert(source: &#generic) -> Self {
+                        #ident {
+                            #(
+                                #fields_name: <#fields_ty as ::inline_config::__private::convert::Convert<
+                                    <#generic as ::inline_config::__private::key::AccessKey<
+                                        #key_ty,
+                                        #access_phantom_generics,
+                                    >>::Repr,
+                                    #convert_phantom_generics,
+                                >>::convert(
+                                    <#generic as ::inline_config::__private::key::AccessKey<
+                                        #key_ty,
+                                        #access_phantom_generics,
+                                    >>::access_key(source)
+                                ),
+                            )*
+                        }
+                    }
+                }
             }
-            ValueKind::Boolean(value) => {
-                Self::from_primitive(syn::parse_quote! { bool }, syn::parse_quote! { #value })
-            }
-            ValueKind::I64(value) => {
-                Self::from_primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
-            }
-            ValueKind::I128(value) => {
-                Self::from_primitive(syn::parse_quote! { i128 }, syn::parse_quote! { #value })
-            }
-            ValueKind::U64(value) => {
-                Self::from_primitive(syn::parse_quote! { u64 }, syn::parse_quote! { #value })
-            }
-            ValueKind::U128(value) => {
-                Self::from_primitive(syn::parse_quote! { u128 }, syn::parse_quote! { #value })
-            }
-            ValueKind::Float(value) => {
-                Self::from_primitive(syn::parse_quote! { f64 }, syn::parse_quote! { #value })
-            }
-            ValueKind::String(value) => Self::from_primitive(
-                syn::parse_quote! { &'static str },
-                syn::parse_quote! { #value },
-            ),
-            ValueKind::Table(value) => {
-                let (names, values): (Vec<_>, Vec<_>) = value.into_iter().unzip();
-                Self::from_container(Some(names), values, ident, vis)
-            }
-            ValueKind::Array(value) => Self::from_container(None, value, ident, vis),
         }
-    }
-
-    fn from_primitive(ty: syn::Type, expr: syn::Expr) -> Self {
-        Self {
-            ty,
-            expr,
-            struct_items: Vec::new(),
-            select_impls: Vec::new(),
-            convert_impls: Vec::new(),
+        syn::Fields::Unnamed(fields_unnamed) => {
+            let fields_ty: Vec<_> = fields_unnamed
+                .unnamed
+                .iter()
+                .map(|field| &field.ty)
+                .collect();
+            let key_ty: Vec<_> = fields_ty
+                .iter()
+                .enumerate()
+                .map(|(index, _)| Key::index_ty(index))
+                .collect();
+            let access_phantom_generics: Vec<_> = fields_ty
+                .iter()
+                .enumerate()
+                .map(|(index, _)| quote::format_ident!("__AccessPhantom_{index}"))
+                .collect();
+            let convert_phantom_generics: Vec<_> = fields_ty
+                .iter()
+                .enumerate()
+                .map(|(index, _)| quote::format_ident!("__ConvertPhantom_{index}"))
+                .collect();
+            syn::parse_quote! {
+                impl<
+                    #(#struct_generics_params,)*
+                    #(#access_phantom_generics,)*
+                    #(#convert_phantom_generics,)*
+                    #generic,
+                >
+                    ::inline_config::__private::convert::Convert<
+                        #generic,
+                        (#((#access_phantom_generics, #convert_phantom_generics),)*),
+                    > for #ident #struct_generics
+                where
+                    #(
+                        #generic: ::inline_config::__private::key::AccessKey<
+                            #key_ty,
+                            #access_phantom_generics,
+                        >,
+                        #fields_ty: ::inline_config::__private::convert::Convert<
+                            <#generic as ::inline_config::__private::key::AccessKey<
+                                #key_ty,
+                                #access_phantom_generics,
+                            >>::Repr,
+                            #convert_phantom_generics,
+                        >,
+                    )*
+                {
+                    fn convert(source: &#generic) -> Self {
+                        #ident(
+                            #(
+                                <#fields_ty as ::inline_config::__private::convert::Convert<
+                                    <#generic as ::inline_config::__private::key::AccessKey<
+                                        #key_ty,
+                                        #access_phantom_generics,
+                                    >>::Repr,
+                                    #convert_phantom_generics,
+                                >>::convert(
+                                    <#generic as ::inline_config::__private::key::AccessKey<
+                                        #key_ty,
+                                        #access_phantom_generics,
+                                    >>::access_key(source)
+                                ),
+                            )*
+                        )
+                    }
+                }
+            }
         }
-    }
-
-    fn from_container(
-        names: Option<Vec<String>>,
-        values: Vec<Value>,
-        ident: &syn::Ident,
-        vis: &syn::Visibility,
-    ) -> Self {
-        let mut fields_ty = Vec::new();
-        let mut fields_expr = Vec::new();
-        let mut struct_items = Vec::new();
-        let mut select_impls = Vec::new();
-        let mut convert_impls = Vec::new();
-        for (index, value) in values.into_iter().enumerate() {
-            let ConfigItemCollector {
-                ty: field_ty,
-                expr: field_expr,
-                struct_items: field_struct_items,
-                select_impls: field_select_impls,
-                convert_impls: field_convert_impls,
-            } = Self::from_value(value, &quote::format_ident!("{ident}_{index}"), vis);
-            fields_ty.push(field_ty);
-            fields_expr.push(field_expr);
-            struct_items.extend(field_struct_items);
-            select_impls.extend(field_select_impls);
-            convert_impls.extend(field_convert_impls);
-        }
-        select_impls.extend(convert::select_representation(ident, &names, &fields_ty));
-        convert_impls.extend(convert::representation_into_containers(
-            ident, &names, &fields_ty,
-        ));
-        struct_items.push(syn::parse_quote! {
-            #vis struct #ident(#(#fields_ty),*);
-        });
-        Self {
-            ty: syn::parse_quote! { #ident },
-            expr: syn::parse_quote! {
-                #ident(#(#fields_expr,)*)
-            },
-            struct_items,
-            select_impls,
-            convert_impls,
+        syn::Fields::Unit => {
+            syn::parse_quote! {
+                impl<
+                    #(#struct_generics_params,)*
+                    #generic,
+                >
+                    ::inline_config::__private::convert::Convert<
+                        #generic,
+                        (),
+                    > for #ident #struct_generics
+                {
+                    fn convert(source: &#generic) -> Self {
+                        #ident
+                    }
+                }
+            }
         }
     }
 }
