@@ -37,3 +37,46 @@ pub fn Key(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 pub fn config_data(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
     delegate_macro(convert::config_data, input)
 }
+
+// use frunk::labelled;
+// use frunk::labelled::Field;
+// use frunk::{labelled::Transmogrifier, LabelledGeneric};
+// fn f<S, T, I>(source: S) -> T
+// where
+//     S: Transmogrifier<T, I>,
+// {
+//     source.transmogrify()
+// }
+
+// struct MyFloat(f32);
+
+// #[derive(LabelledGeneric)]
+// struct __Repr {
+//     ab: i32,
+//     bc: MyFloat,
+// }
+
+// #[derive(LabelledGeneric)]
+// struct Output {
+//     ab: i32,
+//     bc: f64,
+// }
+
+// impl Transmogrifier<(i32, u32), ()> for __Repr {
+//     fn transmogrify(self) -> (i32, u32) {
+//         (self.0, self.1 as u32)
+//     }
+// }
+
+// impl<Key> Transmogrifier<f64, ()> for Field<Key, MyFloat> {
+//     fn transmogrify(self) -> f64 {
+//         self.value.0 as f64
+//     }
+// }
+
+// fn a() {
+//     let a: Output = f(__Repr {
+//         ab: 6,
+//         bc: MyFloat(7.0),
+//     });
+// }

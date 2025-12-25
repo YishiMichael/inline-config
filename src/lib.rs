@@ -1,3 +1,5 @@
+mod key;
+mod repr;
 mod traits;
 
 pub use inline_config_derive::{config, key, ConfigData, Key};

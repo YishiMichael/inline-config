@@ -257,6 +257,7 @@ dependencies = [
 name = "inline-config"
 version = "0.0.1"
 dependencies = [
+ "indexmap",
  "inline-config-derive",
 ]
 

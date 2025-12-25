@@ -13,4 +13,5 @@ version = "0.0.1"
 edition = "2024"
 
 [dependencies]
+indexmap = "2.12.1"
 inline-config-derive = { path = "inline-config-derive" }
