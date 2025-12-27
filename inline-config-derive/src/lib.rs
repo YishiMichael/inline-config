@@ -1,7 +1,8 @@
 mod config_data;
 mod config_repr;
-mod impls;
+mod parse;
 mod path;
+mod value;
 
 fn delegate_macro<I, T>(f: fn(I) -> T, input: proc_macro::TokenStream) -> proc_macro::TokenStream
 where

@@ -4,11 +4,10 @@ use inline_config::{config, path, ConfigData, Get, Path};
 
 config! {
     pub static MY_CONFIG
-        = toml!(r#"
+        = include_config!("../Cargo.toml") + toml!(r#"
             name = "Peter"
             age = 18
-        "#)
-        + json!(r#"
+        "#) + json!(r#"
             {
                 "preferred-name": null
             }
@@ -17,7 +16,7 @@ config! {
 
 #[derive(ConfigData, Debug)]
 struct MyName {
-    name: &'static str,
+    name: String,
     age: u16,
     #[config_data(rename = "preferred-name")]
     preferred_name: Option<&'static str>,
@@ -25,18 +24,18 @@ struct MyName {
 
 fn get_name<'c, C>(config: &'c C) -> MyName
 where
-    C: Get<'c, Path!("name"), MyName>,
+    C: Get<'c, Path!(name), MyName>,
 {
-    config.get(path!("name"))
+    config.get(path!(name))
 }
 
 fn main() {
-    let v: &str = MY_CONFIG.get(path!("name"));
+    let v: &str = MY_CONFIG.get(path!(name));
     println!("{:?}", v);
-    let v: u32 = MY_CONFIG.get(path!("age"));
+    let v: u32 = MY_CONFIG.get(path!(age));
     println!("{:?}", v);
     let v: Option<&str> = MY_CONFIG.get(path!("preferred-name"));
     println!("{:?}", v);
-    let v: MyName = MY_CONFIG.get(path!(""));
+    let v: MyName = MY_CONFIG.get(path!());
     println!("{:?}", v);
 }

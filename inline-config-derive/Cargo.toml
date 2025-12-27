@@ -6,11 +6,41 @@ edition = "2024"
 [lib]
 proc-macro = true
 
-[dependencies]
-config = { version = "0.15.19", features = ["preserve_order"] }
-darling = "0.23.0"
-proc-macro-error = "1.0.4"
-proc-macro2 = "1.0.103"
-quote = "1.0.42"
-syn = "2.0.111"
-winnow = "0.7.14"
+[features]
+indexmap = ["dep:indexmap", "serde_json?/preserve_order", "toml?/preserve_order"]
+json = ["dep:serde_json"]
+toml = ["dep:toml"]
+yaml = ["dep:yaml-rust2"]
+
+[dependencies.darling]
+version = "0.23.0"
+
+[dependencies.proc-macro-error]
+version = "1.0.4"
+
+[dependencies.proc-macro2]
+version = "1.0.103"
+features = ["span-locations"]
+
+[dependencies.quote]
+version = "1.0.42"
+
+[dependencies.syn]
+version = "2.0.111"
+
+[dependencies.indexmap]
+version = "2.12.1"
+optional = true
+
+[dependencies.serde_json]
+version = "1.0.148"
+optional = true
+
+[dependencies.toml]
+version = "0.9.10"
+features = ["parse", "serde"]
+optional = true
+
+[dependencies.yaml-rust2]
+version = "0.11.0"
+optional = true

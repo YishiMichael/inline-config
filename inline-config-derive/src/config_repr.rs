@@ -1,9 +1,9 @@
-use crate::impls::ConfigReprStructure;
+use crate::parse::Format;
+use crate::path::Key;
+use crate::value::Value;
+// use config::{File, FileFormat, Map, Source, Value, ValueKind};
 
-use super::impls::{ArraySlot, ContainerStructure, TableSlot};
-use config::{File, FileFormat, Map, Source, Value, ValueKind};
-
-pub(crate) struct ConfigItems {
+pub struct ConfigItems {
     items: Vec<ConfigItem>,
 }
 
@@ -17,7 +17,7 @@ struct ConfigItem {
     semi_token: syn::Token![;],
 }
 
-struct ConfigSource(Box<dyn Source>);
+struct ConfigSource(Value);
 
 impl syn::parse::Parse for ConfigItems {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
@@ -62,16 +62,7 @@ impl quote::ToTokens for ConfigItem {
             sources,
             semi_token,
         } = self;
-        let value = match sources.into_iter().try_fold(
-            Value::from(Map::<String, Value>::new()),
-            |mut value, source| {
-                source.0.collect_to(&mut value)?;
-                Ok::<_, config::ConfigError>(value)
-            },
-        ) {
-            Ok(value) => value,
-            Err(e) => proc_macro_error::abort_call_site!(e),
-        };
+        let value = sources.iter().map(|source| source.0.clone()).sum();
 
         let ConfigReprTokens {
             ty,
@@ -104,34 +95,40 @@ impl quote::ToTokens for ConfigItem {
 
 impl syn::parse::Parse for ConfigSource {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        if let Ok(file_name) = input.parse::<syn::LitStr>() {
-            return Ok(Self(Box::new(File::with_name(file_name.value().as_str()))));
-        }
-        if let Ok(syn::Macro {
-            path: format,
+        let syn::Macro {
+            path: macro_path,
             tokens: content_tokens,
             ..
-        }) = input.parse()
-        {
-            let format = match format.require_ident()?.clone().to_string().as_str() {
-                "toml" => FileFormat::Toml,
-                "json" => FileFormat::Json,
-                "yaml" => FileFormat::Yaml,
-                "ini" => FileFormat::Ini,
-                "ron" => FileFormat::Ron,
-                "json5" => FileFormat::Json5,
-                _ => {
-                    Err(input.error("supported config formats: toml, json, yaml, ini, ron, json5"))?
-                }
-            };
-            let content: syn::LitStr = syn::parse2(content_tokens)?;
-            return Ok(Self(Box::new(File::from_str(
-                content.value().as_str(),
-                format,
-            ))));
+        } = input.parse()?;
+        let macro_ident = macro_path.require_ident()?;
+        let content: syn::LitStr = syn::parse2(content_tokens)?;
+        let value = match macro_ident.to_string().as_str() {
+            "include_config" => {
+                let source_path = std::path::Path::new(input.span().file().as_str())
+                    .join("..")
+                    .join(content.value());
+                let format = Format::from_extension(
+                    source_path
+                        .extension()
+                        .unwrap_or_default()
+                        .to_str()
+                        .unwrap_or_default(),
+                )
+                .unwrap_or_else(|| {
+                    proc_macro_error::abort!(content, "cannot select format from extension")
+                });
+                let text = std::fs::read_to_string(source_path)
+                    .unwrap_or_else(|e| proc_macro_error::abort!(content, e));
+                format.parse(text.as_str())
+            }
+            format_ident => {
+                let format = Format::from_identifier(format_ident)
+                    .unwrap_or_else(|| proc_macro_error::abort!(macro_ident, "unknown identifier"));
+                format.parse(content.value().as_str())
+            }
         }
-        Err(input.error("expected a string literal or a macro invocation"))
-        // TODO: include! ?
+        .map_err(|e| input.error(e))?;
+        Ok(Self(value))
     }
 }
 
@@ -145,50 +142,38 @@ struct ConfigReprTokens {
 }
 
 impl ConfigReprTokens {
-    fn from_value(value: &config::Value, ident: &syn::Ident, vis: &syn::Visibility) -> Self {
-        match &value.kind {
-            ValueKind::Nil => Self::primitive(syn::parse_quote! { () }, syn::parse_quote! { () }),
-            ValueKind::Boolean(value) => {
+    fn from_value(value: &Value, ident: &syn::Ident, vis: &syn::Visibility) -> Self {
+        match value {
+            Value::Nil => Self::primitive(syn::parse_quote! { () }, syn::parse_quote! { () }),
+            Value::Boolean(value) => {
                 Self::primitive(syn::parse_quote! { bool }, syn::parse_quote! { #value })
             }
-            ValueKind::I64(value) => {
+            Value::Integer(value) => {
                 Self::primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
             }
-            ValueKind::I128(value) => {
-                let value = &(*value as i64);
-                Self::primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
-            }
-            ValueKind::U64(value) => {
-                let value = &(*value as i64);
-                Self::primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
-            }
-            ValueKind::U128(value) => {
-                let value = &(*value as i64);
-                Self::primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
-            }
-            ValueKind::Float(value) => {
+            Value::Float(value) => {
                 Self::primitive(syn::parse_quote! { f64 }, syn::parse_quote! { #value })
             }
-            ValueKind::String(value) => Self::primitive(
+            Value::String(value) => Self::primitive(
                 syn::parse_quote! { &'static str },
                 syn::parse_quote! { #value },
             ),
-            ValueKind::Array(value) => {
+            Value::Array(value) => {
                 let (slots, values): (Vec<_>, Vec<_>) = value
                     .iter()
                     .enumerate()
                     .map(|(index, value)| (ArraySlot { index }, value))
                     .unzip();
-                Self::dispatch(ContainerStructure { slots }, values.as_slice(), ident, vis)
+                Self::dispatch(slots, values.as_slice(), ident, vis)
             }
-            ValueKind::Table(value) => {
+            Value::Table(value) => {
                 let (slots, values): (Vec<_>, Vec<_>) = value
                     .iter()
                     .enumerate()
                     .map(|(index, (name, value))| {
                         (
                             TableSlot {
-                                name: name.to_owned(),
+                                name,
                                 ident: syn::parse_str::<syn::Ident>(name)
                                     .ok()
                                     .filter(|_| !name.chars().all(|c| matches!(c, '0'..'9' | '_')))
@@ -198,7 +183,7 @@ impl ConfigReprTokens {
                         )
                     })
                     .unzip();
-                Self::dispatch(ContainerStructure { slots }, values.as_slice(), ident, vis)
+                Self::dispatch(slots, values.as_slice(), ident, vis)
             }
         }
     }
@@ -216,7 +201,7 @@ impl ConfigReprTokens {
 
     fn dispatch<S>(
         config_repr_structure: S,
-        values: &[&config::Value],
+        values: &[&Value],
         ident: &syn::Ident,
         vis: &syn::Visibility,
     ) -> Self
@@ -249,7 +234,7 @@ impl ConfigReprTokens {
         access_key_impls.extend(config_repr_structure.access_key_impls(ident, tys.as_slice()));
         convert_into_impls.extend(config_repr_structure.convert_into_impls(ident, tys.as_slice()));
         non_nil_repr_impls.push(syn::parse_quote! {
-            impl ::inline_config::__private::convert::NonNilRepr for #ident {}
+            impl ::inline_config::__private::NonNilRepr for #ident {}
         });
         Self {
             ty: syn::parse_quote! {
@@ -261,5 +246,221 @@ impl ConfigReprTokens {
             convert_into_impls,
             non_nil_repr_impls,
         }
+    }
+}
+
+trait ConfigReprStructure {
+    fn expr(&self, ident: &syn::Ident, exprs: &[syn::Expr]) -> syn::Expr;
+    fn struct_item(
+        &self,
+        ident: &syn::Ident,
+        vis: &syn::Visibility,
+        tys: &[syn::Type],
+    ) -> syn::ItemStruct;
+    fn access_key_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl>;
+    fn convert_into_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl>;
+}
+
+struct ArraySlot {
+    index: usize,
+}
+
+struct TableSlot<'s> {
+    name: &'s str,
+    ident: syn::Ident,
+}
+
+impl ConfigReprStructure for Vec<ArraySlot> {
+    fn expr(&self, ident: &syn::Ident, exprs: &[syn::Expr]) -> syn::Expr {
+        syn::parse_quote! {
+            #ident(
+                #(#exprs,)*
+            )
+        }
+    }
+
+    fn struct_item(
+        &self,
+        ident: &syn::Ident,
+        vis: &syn::Visibility,
+        tys: &[syn::Type],
+    ) -> syn::ItemStruct {
+        syn::parse_quote! {
+            #vis struct #ident(
+                #(#vis #tys,)*
+            );
+        }
+    }
+
+    fn access_key_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl> {
+        self.iter()
+            .zip(tys)
+            .map(|(slot, ty)| {
+                let key_ty = Key::index_ty(slot.index);
+                let member = syn::Index::from(slot.index);
+                syn::parse_quote! {
+                    impl ::inline_config::__private::AccessKey<#key_ty> for #ident {
+                        type Repr = #ty;
+
+                        fn access_key(&self) -> &Self::Repr {
+                            &self.#member
+                        }
+                    }
+                }
+            })
+            .collect()
+    }
+
+    fn convert_into_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl> {
+        let members = self.iter().map(|slot| syn::Index::from(slot.index));
+        let lifetime = syn::Lifetime::new("'__inline_config__r", proc_macro2::Span::call_site());
+        let generic = syn::Ident::new("__inline_config__T", proc_macro2::Span::call_site());
+        [
+            syn::parse_quote! {
+                impl<#lifetime, #generic>
+                    ::inline_config::__private::ConvertInto<#lifetime, Vec<#generic>> for #ident
+                where
+                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+                {
+                    fn convert_into(&#lifetime self) -> Vec<#generic> {
+                        [
+                            #(
+                                <#tys as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::convert_into(&self.#members),
+                            )*
+                        ].into()
+                    }
+                }
+            },
+        ].into()
+    }
+}
+
+impl ConfigReprStructure for Vec<TableSlot<'_>> {
+    fn expr(&self, ident: &syn::Ident, exprs: &[syn::Expr]) -> syn::Expr {
+        let members = self.iter().map(|slot| &slot.ident);
+        syn::parse_quote! {
+            #ident {
+                #(#members: #exprs,)*
+            }
+        }
+    }
+
+    fn struct_item(
+        &self,
+        ident: &syn::Ident,
+        vis: &syn::Visibility,
+        tys: &[syn::Type],
+    ) -> syn::ItemStruct {
+        let members = self.iter().map(|slot| &slot.ident);
+        syn::parse_quote! {
+            #vis struct #ident {
+                #(#vis #members: #tys,)*
+            }
+        }
+    }
+
+    fn access_key_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl> {
+        self.iter()
+            .zip(tys)
+            .map(|(slot, ty)| {
+                let key_ty = Key::name_ty(slot.name);
+                let member = &slot.ident;
+                syn::parse_quote! {
+                    impl ::inline_config::__private::AccessKey<#key_ty> for #ident {
+                        type Repr = #ty;
+
+                        fn access_key(&self) -> &Self::Repr {
+                            &self.#member
+                        }
+                    }
+                }
+            })
+            .collect()
+    }
+
+    fn convert_into_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl> {
+        let (names, members): (Vec<_>, Vec<_>) =
+            self.iter().map(|slot| (slot.name, &slot.ident)).unzip();
+        let lifetime = syn::Lifetime::new("'__inline_config__r", proc_macro2::Span::call_site());
+        let generic = syn::Ident::new("__inline_config__T", proc_macro2::Span::call_site());
+        [
+            syn::parse_quote! {
+                impl<#lifetime, #generic>
+                    ::inline_config::__private::ConvertInto<#lifetime, ::std::collections::BTreeMap<&#lifetime str, #generic>> for #ident
+                where
+                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+                {
+                    fn convert_into(&#lifetime self) -> ::std::collections::BTreeMap<&#lifetime str, #generic> {
+                        [
+                            #(
+                                (
+                                    #names,
+                                    <#tys as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::convert_into(&self.#members),
+                                ),
+                            )*
+                        ].into()
+                    }
+                }
+            },
+
+            syn::parse_quote! {
+                impl<#lifetime, #generic>
+                    ::inline_config::__private::ConvertInto<#lifetime, ::std::collections::BTreeMap<String, #generic>> for #ident
+                where
+                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+                {
+                    fn convert_into(&#lifetime self) -> ::std::collections::BTreeMap<String, #generic> {
+                        [
+                            #(
+                                (
+                                    #names.to_string(),
+                                    <#tys as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::convert_into(&self.#members),
+                                ),
+                            )*
+                        ].into()
+                    }
+                }
+            },
+
+            #[cfg(feature = "indexmap")]
+            syn::parse_quote! {
+                impl<#lifetime, #generic>
+                    ::inline_config::__private::ConvertInto<#lifetime, ::indexmap::IndexMap<&#lifetime str, #generic>> for #ident
+                where
+                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+                {
+                    fn convert_into(&#lifetime self) -> ::indexmap::IndexMap<&#lifetime str, #generic> {
+                        [
+                            #(
+                                (
+                                    #names,
+                                    <#tys as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::convert_into(&self.#members),
+                                ),
+                            )*
+                        ].into()
+                    }
+                }
+            },
+
+            #[cfg(feature = "indexmap")]
+            syn::parse_quote! {
+                impl<#lifetime, #generic>
+                    ::inline_config::__private::ConvertInto<#lifetime, ::indexmap::IndexMap<String, #generic>> for #ident
+                where
+                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+                {
+                    fn convert_into(&#lifetime self) -> ::indexmap::IndexMap<String, #generic> {
+                        [
+                            #(
+                                (
+                                    #names.to_string(),
+                                    <#tys as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::convert_into(&self.#members),
+                                ),
+                            )*
+                        ].into()
+                    }
+                }
+            },
+        ].into()
     }
 }

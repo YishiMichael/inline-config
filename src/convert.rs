@@ -91,5 +91,10 @@ impl NonNilRepr for i64 {}
 impl NonNilRepr for f64 {}
 
 impl<T> NonNil for Vec<T> {}
-impl<T> NonNil for std::collections::HashMap<&str, T> {}
-impl<T> NonNil for std::collections::HashMap<String, T> {}
+impl<T> NonNil for std::collections::BTreeMap<&str, T> {}
+impl<T> NonNil for std::collections::BTreeMap<String, T> {}
+
+#[cfg(feature = "indexmap")]
+impl<T> NonNil for indexmap::IndexMap<&str, T> {}
+#[cfg(feature = "indexmap")]
+impl<T> NonNil for indexmap::IndexMap<String, T> {}

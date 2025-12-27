@@ -19,10 +19,6 @@ where
 
 #[doc(hidden)]
 pub mod __private {
-    pub mod convert {
-        pub use crate::convert::*;
-    }
-    pub mod key {
-        pub use crate::key::*;
-    }
+    pub use crate::convert::*;
+    pub use crate::key::*;
 }

@@ -10,6 +10,16 @@ name = "inline-config"
 version = "0.0.1"
 edition = "2024"
 
-[dependencies]
-indexmap = "2.12.1"
-inline-config-derive = { path = "inline-config-derive" }
+[features]
+default = ["json", "toml", "yaml"]
+indexmap = ["inline-config-derive/indexmap", "dep:indexmap"]
+json = ["inline-config-derive/json"]
+toml = ["inline-config-derive/toml"]
+yaml = ["inline-config-derive/yaml"]
+
+[dependencies.inline-config-derive]
+path = "inline-config-derive"
+
+[dependencies.indexmap]
+version = "2.12.1"
+optional = true
