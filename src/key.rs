@@ -1,4 +1,3 @@
-use super::repr::{Field, HCons};
 use std::marker::PhantomData;
 
 // Borrowed from frunk_core::labelled::chars
@@ -7,8 +6,7 @@ pub mod chars {
         ($($c:tt)*) => {
             $(
                 #[allow(non_camel_case_types)]
-                #[derive(PartialEq, Debug, Eq, Clone, Copy, PartialOrd, Ord, Hash)]
-                pub enum $c {}
+                pub struct $c;
             )*
         };
     }
@@ -20,83 +18,59 @@ pub mod chars {
     );
 
     // For unicode chars
-    pub enum UC<const CODEPOINT: u32> {}
+    pub struct UC<const CODEPOINT: u32>;
 }
 
-pub struct KeyIndex<Index> {
-    pub phantom: PhantomData<Index>,
-    pub index: usize,
+pub struct KeyIndex<Index>(PhantomData<Index>);
+
+pub struct KeyName<Name>(PhantomData<Name>);
+
+impl<Index> Default for KeyIndex<Index> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
 }
 
-pub struct KeyName<Name> {
-    pub phantom: PhantomData<Name>,
-    pub name: &'static str,
+impl<Name> Default for KeyName<Name> {
+    fn default() -> Self {
+        Self(PhantomData)
+    }
 }
 
-// The phantom types are used to avoid overlapping impls for some traits.
-// See frunk_core::indices, frunk_core::labelled::ByNameFieldPlucker
-pub struct HerePhantom;
-
-pub struct TherePhantom<Phantom>(Phantom);
-
+#[derive(Default)]
 pub struct PathNil;
 
-pub struct PathCons<Head, Tail>(pub Head, pub Tail);
+#[derive(Default)]
+pub struct PathCons<K, KS>(K, KS);
 
-pub trait AccessKey<Key, Phantom> {
+pub trait AccessKey<K> {
     type Repr;
 
     fn access_key(&self) -> &Self::Repr;
 }
 
-pub trait AccessPath<'r, Path, Phantom> {
+pub trait AccessPath<'c, P> {
     type Repr;
 
-    fn access_path(&'r self) -> &'r Self::Repr;
+    fn access_path(&'c self) -> &'c Self::Repr;
 }
 
-impl<Key, Repr, Tail> AccessKey<Key, HerePhantom> for HCons<Field<Key, Repr>, Tail> {
-    type Repr = Repr;
+impl<'c, R> AccessPath<'c, PathNil> for R {
+    type Repr = R;
 
-    fn access_key(&self) -> &Self::Repr {
-        &self.head.value
-    }
-}
-
-impl<Head, Tail, Key, Phantom> AccessKey<Key, TherePhantom<Phantom>> for HCons<Head, Tail>
-where
-    Tail: AccessKey<Key, Phantom>,
-{
-    type Repr = Tail::Repr;
-
-    fn access_key(&self) -> &Self::Repr {
-        self.tail.access_key()
-    }
-}
-
-impl<Repr> AccessPath<'_, PathNil, PathNil> for Repr {
-    type Repr = Repr;
-
-    fn access_path(&self) -> &Self::Repr {
+    fn access_path(&'c self) -> &'c Self::Repr {
         self
     }
 }
 
-impl<'r, Head, Tail, PathHead, PathTail, PhantomHead, PhantomTail>
-    AccessPath<'r, PathCons<PathHead, PathTail>, PathCons<PhantomHead, PhantomTail>>
-    for HCons<Head, Tail>
+impl<'c, R, K, KS> AccessPath<'c, PathCons<K, KS>> for R
 where
-    HCons<Head, Tail>: AccessKey<PathHead, PhantomHead>,
-    <HCons<Head, Tail> as AccessKey<PathHead, PhantomHead>>::Repr:
-        'r + AccessPath<'r, PathTail, PhantomTail>,
+    R: AccessKey<K>,
+    R::Repr: 'c + AccessPath<'c, KS>,
 {
-    type Repr = <<HCons<Head, Tail> as AccessKey<PathHead, PhantomHead>>::Repr as AccessPath<
-        'r,
-        PathTail,
-        PhantomTail,
-    >>::Repr;
+    type Repr = <R::Repr as AccessPath<'c, KS>>::Repr;
 
-    fn access_path(&'r self) -> &'r Self::Repr {
+    fn access_path(&'c self) -> &'c Self::Repr {
         self.access_key().access_path()
     }
 }

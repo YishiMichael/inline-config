@@ -1,7 +1,5 @@
-#[derive(Clone)]
 pub(crate) struct Path(Vec<Key>);
 
-#[derive(Clone)]
 pub(crate) enum Key {
     Index(usize),
     Name(String),
@@ -84,25 +82,15 @@ impl Path {
     }
 
     pub(crate) fn expr(self) -> syn::Expr {
-        self.0.iter().rfold(
-            syn::parse_quote! {
-                ::inline_config::__private::key::PathNil
-            },
-            |tail_expr, key| {
-                let head_expr = match key {
-                    Key::Index(index) => Key::index_expr(*index),
-                    Key::Name(name) => Key::name_expr(name),
-                };
-                syn::parse_quote! {
-                    ::inline_config::__private::key::PathCons(#head_expr, #tail_expr)
-                }
-            },
-        )
+        let ty = self.ty();
+        syn::parse_quote! {
+            <#ty>::default()
+        }
     }
 }
 
 impl Key {
-    fn index_ty_param(index: usize) -> syn::Type {
+    pub(crate) fn index_ty(index: usize) -> syn::Type {
         let index_str = index.to_string();
         let tys = index_str.chars().map(|c| -> syn::Type {
             let ident = quote::format_ident!("_{c}");
@@ -111,32 +99,15 @@ impl Key {
             }
         });
         syn::parse_quote! {
-            (#(#tys,)*)
+            ::inline_config::__private::key::KeyIndex<(#(#tys,)*)>
         }
     }
 
-    pub(crate) fn index_ty(index: usize) -> syn::Type {
-        let index_ty_param = Self::index_ty_param(index);
-        syn::parse_quote! {
-            ::inline_config::__private::key::KeyIndex<#index_ty_param>
-        }
-    }
-
-    pub(crate) fn index_expr(index: usize) -> syn::Expr {
-        let index_ty_param = Self::index_ty_param(index);
-        syn::parse_quote! {
-            ::inline_config::__private::key::KeyIndex {
-                phantom: ::std::marker::PhantomData::<#index_ty_param>,
-                index: #index,
-            }
-        }
-    }
-
-    fn name_ty_param(name: &str) -> syn::Type {
+    pub(crate) fn name_ty(name: &str) -> syn::Type {
         // Referenced from frunk_proc_macro_helpers/lib.rs
         let tys = name.chars().map(|c| -> syn::Type {
             match c {
-                'a'..'z' | 'A'..'Z' => {
+                'A'..'Z' | 'a'..'z' => {
                     let ident = quote::format_ident!("{c}");
                     syn::parse_quote! {
                         ::inline_config::__private::key::chars::#ident
@@ -157,24 +128,7 @@ impl Key {
             }
         });
         syn::parse_quote! {
-            (#(#tys,)*)
-        }
-    }
-
-    pub(crate) fn name_ty(name: &str) -> syn::Type {
-        let name_ty_param = Self::name_ty_param(name);
-        syn::parse_quote! {
-            ::inline_config::__private::key::KeyName<#name_ty_param>
-        }
-    }
-
-    pub(crate) fn name_expr(name: &str) -> syn::Expr {
-        let name_ty_param = Self::name_ty_param(name);
-        syn::parse_quote! {
-            ::inline_config::__private::key::KeyName {
-                phantom: ::std::marker::PhantomData::<#name_ty_param>,
-                name: #name,
-            }
+            ::inline_config::__private::key::KeyName<(#(#tys,)*)>
         }
     }
 }

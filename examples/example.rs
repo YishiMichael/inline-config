@@ -1,36 +1,18 @@
 #![allow(unused)]
 
-use inline_config::{config, path, ConfigData, Get};
+use inline_config::{config, path, ConfigData, Get, Path};
 
 config! {
-    pub static MY_CONFIG = toml!(r#"
-        name = "Peter"
-        age = 18
-    "#) + json!(r#"
-        {
-            "preferred-name": null
-        }
-    "#);
-    // pub static MY_CONFIG = toml!(r#"
-    //     name = "override"
-    // "#) + json!(r#"
-    // {
-    //     "inner": {
-    //         "name": {
-    //             "outer": "json_override"
-    //         },
-    //         "name2": "other",
-    //         "l": ["a", "c", "d"]
-    //     }
-    // }"#) + json5!(r#"
-    // {
-    //     "name": "json_override",
-    //     "name2": "out_name2",
-    //     "l": ["a", "b"],
-    // }"#) + toml!(r#"
-    //     [inner.name]
-    //     inner = "5"
-    // "#);
+    pub static MY_CONFIG
+        = toml!(r#"
+            name = "Peter"
+            age = 18
+        "#)
+        + json!(r#"
+            {
+                "preferred-name": null
+            }
+        "#);
 }
 
 #[derive(ConfigData, Debug)]
@@ -41,13 +23,12 @@ struct MyName {
     preferred_name: Option<&'static str>,
 }
 
-// #[derive(ConfigData, Debug)]
-// #[allow(unused)]
-// struct MyS {
-//     name: MyName,
-//     name2: String,
-//     l: Vec<&'static str>,
-// }
+fn get_name<'c, C>(config: &'c C) -> MyName
+where
+    C: Get<'c, Path!("name"), MyName>,
+{
+    config.get(path!("name"))
+}
 
 fn main() {
     let v: &str = MY_CONFIG.get(path!("name"));
@@ -58,11 +39,4 @@ fn main() {
     println!("{:?}", v);
     let v: MyName = MY_CONFIG.get(path!(""));
     println!("{:?}", v);
-    // let v: Option<&str> = MY_CONFIG.get(path!("value"));
-    // let v: ((&str, &str), &str, Vec<String>) = MY_CONFIG.get(key!("inner"));
-    // println!("{:?}", v);
-    // let v: MyS = MY_CONFIG.get(key!(""));
-    // println!("{:?}", v);
-    // let v: &str = MY_CONFIG.get(key!("inner.name.inner"));
-    // println!("{:?}", v);
 }

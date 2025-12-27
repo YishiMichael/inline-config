@@ -1,21 +1,19 @@
 mod convert;
 mod key;
-mod repr;
 
 pub use inline_config_derive::{config, path, ConfigData, Path};
 
-pub trait Get<'r, Path, AccessPhantom, ConvertPhantom, Type> {
-    fn get(&'r self, path: Path) -> Type;
+pub trait Get<'c, P, T> {
+    fn get(&'c self, path: P) -> T;
 }
 
-impl<'r, Repr, Path: 'r, AccessPhantom: 'r, ConvertPhantom, Type>
-    Get<'r, Path, AccessPhantom, ConvertPhantom, Type> for Repr
+impl<'c, C, P, T> Get<'c, P, T> for C
 where
-    Repr: key::AccessPath<'r, Path, AccessPhantom>,
-    Type: convert::Convert<Repr::Repr, ConvertPhantom>,
+    C: key::AccessPath<'c, P>,
+    C::Repr: 'c + convert::ConvertInto<'c, T>,
 {
-    fn get(&'r self, _path: Path) -> Type {
-        convert::Convert::convert(self.access_path())
+    fn get(&'c self, _path: P) -> T {
+        convert::ConvertInto::convert_into(self.access_path())
     }
 }
 
@@ -26,8 +24,5 @@ pub mod __private {
     }
     pub mod key {
         pub use crate::key::*;
-    }
-    pub mod repr {
-        pub use crate::repr::*;
     }
 }
