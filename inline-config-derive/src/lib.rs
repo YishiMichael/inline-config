@@ -1,6 +1,7 @@
-mod config;
+mod config_data;
+mod config_repr;
+mod impls;
 mod path;
-mod structures;
 
 fn delegate_macro<I, T>(f: fn(I) -> T, input: proc_macro::TokenStream) -> proc_macro::TokenStream
 where
@@ -16,7 +17,7 @@ where
 #[proc_macro_error::proc_macro_error]
 #[proc_macro]
 pub fn config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(std::convert::identity::<config::ConfigItems>, input)
+    delegate_macro(std::convert::identity::<config_repr::ConfigItems>, input)
 }
 
 #[proc_macro_error::proc_macro_error]
@@ -35,5 +36,5 @@ pub fn Path(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 #[proc_macro_error::proc_macro_error]
 #[proc_macro_derive(ConfigData, attributes(config_data))]
 pub fn config_data(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(config::config_data, input)
+    delegate_macro(std::convert::identity::<config_data::ConfigData>, input)
 }

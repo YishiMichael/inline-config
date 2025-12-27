@@ -5,15 +5,20 @@ pub(crate) trait ConfigReprStructure {
     fn struct_item(
         &self,
         ident: &syn::Ident,
-        tys: &[syn::Type],
         vis: &syn::Visibility,
+        tys: &[syn::Type],
     ) -> syn::ItemStruct;
     fn access_key_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl>;
     fn convert_into_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl>;
 }
 
 pub(crate) trait ConfigDataStructure {
-    fn convert_from_impl(&self, ident: &syn::Ident, generics: &syn::Generics) -> syn::ItemImpl;
+    fn convert_from_impl(
+        &self,
+        ident: &syn::Ident,
+        generics_params: &[&syn::GenericParam],
+        where_predicates: Option<&syn::punctuated::Punctuated<syn::WherePredicate, syn::Token![,]>>,
+    ) -> syn::ItemImpl;
 }
 
 pub(crate) struct ArraySlot {
@@ -54,12 +59,12 @@ impl ConfigReprStructure for ContainerStructure<ArraySlot> {
     fn struct_item(
         &self,
         ident: &syn::Ident,
-        tys: &[syn::Type],
         vis: &syn::Visibility,
+        tys: &[syn::Type],
     ) -> syn::ItemStruct {
         syn::parse_quote! {
             #vis struct #ident(
-                #(#tys,)*
+                #(#vis #tys,)*
             );
         }
     }
@@ -121,13 +126,13 @@ impl ConfigReprStructure for ContainerStructure<TableSlot> {
     fn struct_item(
         &self,
         ident: &syn::Ident,
-        tys: &[syn::Type],
         vis: &syn::Visibility,
+        tys: &[syn::Type],
     ) -> syn::ItemStruct {
         let locs = self.slots.iter().map(|slot| &slot.ident);
         syn::parse_quote! {
             #vis struct #ident {
-                #(#locs: #tys,)*
+                #(#vis #locs: #tys,)*
             }
         }
     }
@@ -238,12 +243,12 @@ impl ConfigReprStructure for ContainerStructure<TableSlot> {
 }
 
 impl ConfigDataStructure for UnitStructure {
-    fn convert_from_impl(&self, ident: &syn::Ident, generics: &syn::Generics) -> syn::ItemImpl {
-        let generics_params: Vec<_> = generics.params.iter().collect();
-        let where_predicates = generics
-            .where_clause
-            .as_ref()
-            .map(|where_clause| &where_clause.predicates);
+    fn convert_from_impl(
+        &self,
+        ident: &syn::Ident,
+        generics_params: &[&syn::GenericParam],
+        where_predicates: Option<&syn::punctuated::Punctuated<syn::WherePredicate, syn::Token![,]>>,
+    ) -> syn::ItemImpl {
         let lifetime = syn::Lifetime::new("'__inline_config__r", proc_macro2::Span::call_site());
         let generic = syn::Ident::new("__inline_config__R", proc_macro2::Span::call_site());
         syn::parse_quote! {
@@ -261,17 +266,17 @@ impl ConfigDataStructure for UnitStructure {
 }
 
 impl ConfigDataStructure for ContainerStructure<ArrayTypedSlot<'_>> {
-    fn convert_from_impl(&self, ident: &syn::Ident, generics: &syn::Generics) -> syn::ItemImpl {
+    fn convert_from_impl(
+        &self,
+        ident: &syn::Ident,
+        generics_params: &[&syn::GenericParam],
+        where_predicates: Option<&syn::punctuated::Punctuated<syn::WherePredicate, syn::Token![,]>>,
+    ) -> syn::ItemImpl {
         let (key_tys, tys): (Vec<_>, Vec<_>) = self
             .slots
             .iter()
             .map(|slot| (Key::index_ty(slot.index), slot.ty))
             .unzip();
-        let generics_params: Vec<_> = generics.params.iter().collect();
-        let where_predicates = generics
-            .where_clause
-            .as_ref()
-            .map(|where_clause| &where_clause.predicates);
         let lifetime = syn::Lifetime::new("'__inline_config__r", proc_macro2::Span::call_site());
         let generic = syn::Ident::new("__inline_config__R", proc_macro2::Span::call_site());
         syn::parse_quote! {
@@ -303,17 +308,17 @@ impl ConfigDataStructure for ContainerStructure<ArrayTypedSlot<'_>> {
 }
 
 impl ConfigDataStructure for ContainerStructure<TableTypedSlot<'_>> {
-    fn convert_from_impl(&self, ident: &syn::Ident, generics: &syn::Generics) -> syn::ItemImpl {
+    fn convert_from_impl(
+        &self,
+        ident: &syn::Ident,
+        generics_params: &[&syn::GenericParam],
+        where_predicates: Option<&syn::punctuated::Punctuated<syn::WherePredicate, syn::Token![,]>>,
+    ) -> syn::ItemImpl {
         let (locs, (key_tys, tys)): (Vec<_>, (Vec<_>, Vec<_>)) = self
             .slots
             .iter()
             .map(|slot| (slot.ident, (Key::name_ty(slot.name.as_str()), slot.ty)))
             .unzip();
-        let generics_params: Vec<_> = generics.params.iter().collect();
-        let where_predicates = generics
-            .where_clause
-            .as_ref()
-            .map(|where_clause| &where_clause.predicates);
         let lifetime = syn::Lifetime::new("'__inline_config__r", proc_macro2::Span::call_site());
         let generic = syn::Ident::new("__inline_config__R", proc_macro2::Span::call_site());
         syn::parse_quote! {

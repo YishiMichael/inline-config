@@ -1,9 +1,7 @@
-use super::structures::{
-    ArraySlot, ArrayTypedSlot, ConfigDataStructure, ConfigReprStructure, ContainerStructure,
-    TableSlot, TableTypedSlot, UnitStructure,
-};
+use crate::impls::ConfigReprStructure;
+
+use super::impls::{ArraySlot, ContainerStructure, TableSlot};
 use config::{File, FileFormat, Map, Source, Value, ValueKind};
-use darling::FromField;
 
 pub(crate) struct ConfigItems {
     items: Vec<ConfigItem>,
@@ -13,7 +11,7 @@ struct ConfigItem {
     attrs: Vec<syn::Attribute>,
     vis: syn::Visibility,
     static_token: syn::Token![static],
-    name: syn::Ident,
+    ident: syn::Ident,
     eq_token: syn::Token![=],
     sources: syn::punctuated::Punctuated<ConfigSource, syn::Token![+]>,
     semi_token: syn::Token![;],
@@ -43,12 +41,12 @@ impl syn::parse::Parse for ConfigItem {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         Ok(Self {
             attrs: input.call(syn::Attribute::parse_outer)?,
-            vis: input.parse::<syn::Visibility>()?,
-            static_token: input.parse::<syn::Token![static]>()?,
-            name: input.parse::<syn::Ident>()?,
-            eq_token: input.parse::<syn::Token![=]>()?,
+            vis: input.parse()?,
+            static_token: input.parse()?,
+            ident: input.parse()?,
+            eq_token: input.parse()?,
             sources: syn::punctuated::Punctuated::parse_separated_nonempty(input)?,
-            semi_token: input.parse::<syn::Token![;]>()?,
+            semi_token: input.parse()?,
         })
     }
 }
@@ -59,7 +57,7 @@ impl quote::ToTokens for ConfigItem {
             attrs,
             vis,
             static_token,
-            name,
+            ident,
             eq_token,
             sources,
             semi_token,
@@ -75,17 +73,18 @@ impl quote::ToTokens for ConfigItem {
             Err(e) => proc_macro_error::abort_call_site!(e),
         };
 
-        let ConfigItemTokens {
+        let ConfigReprTokens {
             ty,
             expr,
             struct_items,
             access_key_impls,
             convert_into_impls,
-        } = ConfigItemTokens::from_value(&value, &quote::format_ident!("__{name}_"), &vis);
+            non_nil_repr_impls,
+        } = ConfigReprTokens::from_value(&value, &quote::format_ident!("__{ident}_"), &vis);
 
         let static_item: syn::ItemStatic = syn::parse_quote! {
             #(#attrs)*
-            #vis #static_token #name: #ty #eq_token #expr #semi_token
+            #vis #static_token #ident: #ty #eq_token #expr #semi_token
         };
         static_item.to_tokens(tokens);
         struct_items
@@ -97,6 +96,9 @@ impl quote::ToTokens for ConfigItem {
         convert_into_impls
             .iter()
             .for_each(|convert_into_impl| convert_into_impl.to_tokens(tokens));
+        non_nil_repr_impls
+            .iter()
+            .for_each(|non_nil_repr_impl| non_nil_repr_impl.to_tokens(tokens));
     }
 }
 
@@ -129,46 +131,45 @@ impl syn::parse::Parse for ConfigSource {
             ))));
         }
         Err(input.error("expected a string literal or a macro invocation"))
+        // TODO: include! ?
     }
 }
 
-struct ConfigItemTokens {
+struct ConfigReprTokens {
     ty: syn::Type,
     expr: syn::Expr,
     struct_items: Vec<syn::ItemStruct>,
     access_key_impls: Vec<syn::ItemImpl>,
     convert_into_impls: Vec<syn::ItemImpl>,
+    non_nil_repr_impls: Vec<syn::ItemImpl>,
 }
 
-impl ConfigItemTokens {
-    fn from_value(value: &Value, ident: &syn::Ident, vis: &syn::Visibility) -> Self {
+impl ConfigReprTokens {
+    fn from_value(value: &config::Value, ident: &syn::Ident, vis: &syn::Visibility) -> Self {
         match &value.kind {
-            ValueKind::Nil => {
-                // proc_macro_error::abort_call_site!("cannot handle Nil type");
-                Self::from_primitive(syn::parse_quote! { () }, syn::parse_quote! { () })
-            }
+            ValueKind::Nil => Self::primitive(syn::parse_quote! { () }, syn::parse_quote! { () }),
             ValueKind::Boolean(value) => {
-                Self::from_primitive(syn::parse_quote! { bool }, syn::parse_quote! { #value })
+                Self::primitive(syn::parse_quote! { bool }, syn::parse_quote! { #value })
             }
             ValueKind::I64(value) => {
-                Self::from_primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
+                Self::primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
             }
             ValueKind::I128(value) => {
                 let value = &(*value as i64);
-                Self::from_primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
+                Self::primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
             }
             ValueKind::U64(value) => {
                 let value = &(*value as i64);
-                Self::from_primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
+                Self::primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
             }
             ValueKind::U128(value) => {
                 let value = &(*value as i64);
-                Self::from_primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
+                Self::primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
             }
             ValueKind::Float(value) => {
-                Self::from_primitive(syn::parse_quote! { f64 }, syn::parse_quote! { #value })
+                Self::primitive(syn::parse_quote! { f64 }, syn::parse_quote! { #value })
             }
-            ValueKind::String(value) => Self::from_primitive(
+            ValueKind::String(value) => Self::primitive(
                 syn::parse_quote! { &'static str },
                 syn::parse_quote! { #value },
             ),
@@ -178,12 +179,7 @@ impl ConfigItemTokens {
                     .enumerate()
                     .map(|(index, value)| (ArraySlot { index }, value))
                     .unzip();
-                Self::from_config_repr_structure(
-                    ContainerStructure { slots },
-                    values.as_slice(),
-                    ident,
-                    vis,
-                )
+                Self::dispatch(ContainerStructure { slots }, values.as_slice(), ident, vis)
             }
             ValueKind::Table(value) => {
                 let (slots, values): (Vec<_>, Vec<_>) = value
@@ -202,29 +198,25 @@ impl ConfigItemTokens {
                         )
                     })
                     .unzip();
-                Self::from_config_repr_structure(
-                    ContainerStructure { slots },
-                    values.as_slice(),
-                    ident,
-                    vis,
-                )
+                Self::dispatch(ContainerStructure { slots }, values.as_slice(), ident, vis)
             }
         }
     }
 
-    fn from_primitive(ty: syn::Type, expr: syn::Expr) -> Self {
+    fn primitive(ty: syn::Type, expr: syn::Expr) -> Self {
         Self {
             ty,
             expr,
-            struct_items: Vec::new(),
-            access_key_impls: Vec::new(),
-            convert_into_impls: Vec::new(),
+            struct_items: [].into(),
+            access_key_impls: [].into(),
+            convert_into_impls: [].into(),
+            non_nil_repr_impls: [].into(),
         }
     }
 
-    fn from_config_repr_structure<S>(
+    fn dispatch<S>(
         config_repr_structure: S,
-        values: &[&Value],
+        values: &[&config::Value],
         ident: &syn::Ident,
         vis: &syn::Visibility,
     ) -> Self
@@ -236,70 +228,38 @@ impl ConfigItemTokens {
         let mut struct_items = Vec::new();
         let mut access_key_impls = Vec::new();
         let mut convert_into_impls = Vec::new();
+        let mut non_nil_repr_impls = Vec::new();
         for (index, value) in values.iter().enumerate() {
-            let ConfigItemTokens {
+            let Self {
                 ty: field_ty,
                 expr: field_expr,
                 struct_items: field_struct_items,
                 access_key_impls: field_access_key_impls,
                 convert_into_impls: field_convert_into_impls,
+                non_nil_repr_impls: field_non_nil_repr_impls,
             } = Self::from_value(value, &quote::format_ident!("{ident}_{index}"), vis);
             tys.push(field_ty);
             exprs.push(field_expr);
             struct_items.extend(field_struct_items);
             access_key_impls.extend(field_access_key_impls);
             convert_into_impls.extend(field_convert_into_impls);
+            non_nil_repr_impls.extend(field_non_nil_repr_impls);
         }
-        struct_items.push(config_repr_structure.struct_item(ident, tys.as_slice(), vis));
+        struct_items.push(config_repr_structure.struct_item(ident, vis, tys.as_slice()));
         access_key_impls.extend(config_repr_structure.access_key_impls(ident, tys.as_slice()));
         convert_into_impls.extend(config_repr_structure.convert_into_impls(ident, tys.as_slice()));
+        non_nil_repr_impls.push(syn::parse_quote! {
+            impl ::inline_config::__private::convert::NonNilRepr for #ident {}
+        });
         Self {
-            ty: syn::parse_quote! { #ident },
+            ty: syn::parse_quote! {
+                #ident
+            },
             expr: config_repr_structure.expr(ident, exprs.as_slice()),
             struct_items,
             access_key_impls,
             convert_into_impls,
+            non_nil_repr_impls,
         }
-    }
-}
-
-#[derive(FromField)]
-#[darling(attributes(config_data))]
-struct ConfigDataFieldAttrs {
-    rename: Option<String>,
-}
-
-pub(crate) fn config_data(input: syn::ItemStruct) -> syn::ItemImpl {
-    match &input.fields {
-        syn::Fields::Unit => UnitStructure.convert_from_impl(&input.ident, &input.generics),
-        syn::Fields::Unnamed(fields_unnamed) => ContainerStructure {
-            slots: fields_unnamed
-                .unnamed
-                .iter()
-                .enumerate()
-                .map(|(index, field)| ArrayTypedSlot {
-                    index,
-                    ty: &field.ty,
-                })
-                .collect(),
-        }
-        .convert_from_impl(&input.ident, &input.generics),
-        syn::Fields::Named(fields_named) => ContainerStructure {
-            slots: fields_named
-                .named
-                .iter()
-                .map(|field| {
-                    let ident = field.ident.as_ref().unwrap();
-                    let attrs = ConfigDataFieldAttrs::from_field(field)
-                        .unwrap_or_else(|e| proc_macro_error::abort_call_site!(e));
-                    TableTypedSlot {
-                        name: attrs.rename.unwrap_or(ident.to_string()),
-                        ident,
-                        ty: &field.ty,
-                    }
-                })
-                .collect(),
-        }
-        .convert_from_impl(&input.ident, &input.generics),
     }
 }
