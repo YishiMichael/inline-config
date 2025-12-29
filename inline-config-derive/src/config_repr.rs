@@ -95,7 +95,7 @@ fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
 
         syn::Expr::Macro(syn::ExprMacro { attrs, mac }) if mac.path.is_ident("include_config") => {
             let path_lit: syn::LitStr = syn::parse2(mac.tokens.clone())?;
-            let path = resolve_path(path_lit.value().as_str());
+            let path = resolve_path(&path_lit);
 
             // Resolve the relative path at the directory containing the call site file.
             let path = if path.is_absolute() {
@@ -150,11 +150,42 @@ fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
 
 // Replace `${ENV_VAR}` in paths.
 // Inspired by crate include_dir.
-fn resolve_path(s: &str) -> std::path::PathBuf {
-    let mut path = std::path::PathBuf::new();
-    path.push(s);
-    path
-    // TODO
+#[cfg(feature = "expand-env")]
+fn resolve_path(path_lit: &syn::LitStr) -> std::path::PathBuf {
+    let mut path = String::new();
+    let path_str = path_lit.value();
+    let mut chars = path_str.chars();
+    while let Some(c) = chars.next() {
+        if c != '$' || chars.next() != Some('{') {
+            path.push(c);
+            continue;
+        }
+        let mut variable = String::new();
+        let mut depth = 0;
+        loop {
+            match chars.next() {
+                None => proc_macro_error::abort!(path_lit, "unclosed ${ENV_VAR}"),
+                Some('}') if depth == 0 => break,
+                Some(c) => {
+                    variable.push(c);
+                    match c {
+                        '{' => depth += 1,
+                        '}' => depth -= 1,
+                        _ => (),
+                    }
+                }
+            }
+        }
+        path.push_str(
+            &std::env::var(variable).unwrap_or_else(|e| proc_macro_error::abort!(path_lit, e)),
+        );
+    }
+    path.into()
+}
+
+#[cfg(not(feature = "expand-env"))]
+fn resolve_path(path_lit: &syn::LitStr) -> std::path::PathBuf {
+    path_lit.value().into()
 }
 
 struct ConfigReprModule {
@@ -314,7 +345,11 @@ impl ConfigReprModule {
             .map(|(index, (name, value))| {
                 let mod_ident = syn::parse_str::<syn::Ident>(name)
                     .ok()
-                    .filter(|_| !name.chars().all(|c| matches!(c, '0'..'9' | '_')))
+                    .or_else(|| syn::parse_str::<syn::Ident>(format!("r#{name}").as_str()).ok())
+                    .filter(|_| {
+                        !(name.chars().next() == Some('_')
+                            && name.chars().skip(1).all(|c| matches!(c, '0'..'9')))
+                    })
                     .unwrap_or_else(|| quote::format_ident!("_{index}"));
                 let ident = quote::format_ident!("{ident}_{index}");
                 let field_module = Self::from_value(

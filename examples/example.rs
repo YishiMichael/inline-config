@@ -2,7 +2,7 @@ use inline_config::{config, path, ConfigData, Get, Path};
 
 config! {
     pub static MY_CONFIG
-        = include_config!("example_config.toml")
+        = include_config!("${CARGO_MANIFEST_DIR}/examples/example_config.toml")
         + #[toml] r#"
             name = "Peter"
             age = 18

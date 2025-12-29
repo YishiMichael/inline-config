@@ -8,10 +8,13 @@ publish = false
 proc-macro = true
 
 [features]
+expand-env = []
 indexmap = ["dep:indexmap", "serde_json?/preserve_order", "toml?/preserve_order"]
 json = ["dep:serde_json"]
 toml = ["dep:toml"]
 yaml = ["dep:yaml-rust2"]
+
+[dependencies]
 
 [dependencies.darling]
 version = "0.23.0"
