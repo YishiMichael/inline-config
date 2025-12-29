@@ -1,7 +1,6 @@
 use crate::parse::Format;
 use crate::path::Key;
 use crate::value::Value;
-// use config::{File, FileFormat, Map, Source, Value, ValueKind};
 
 pub struct ConfigItems {
     items: Vec<ConfigItem>,
@@ -13,11 +12,9 @@ struct ConfigItem {
     static_token: syn::Token![static],
     ident: syn::Ident,
     eq_token: syn::Token![=],
-    sources: syn::punctuated::Punctuated<ConfigSource, syn::Token![+]>,
+    value: Value,
     semi_token: syn::Token![;],
 }
-
-struct ConfigSource(Value);
 
 impl syn::parse::Parse for ConfigItems {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
@@ -45,7 +42,7 @@ impl syn::parse::Parse for ConfigItem {
             static_token: input.parse()?,
             ident: input.parse()?,
             eq_token: input.parse()?,
-            sources: syn::punctuated::Punctuated::parse_separated_nonempty(input)?,
+            value: value_from_expr(&input.parse()?)?,
             semi_token: input.parse()?,
         })
     }
@@ -59,11 +56,9 @@ impl quote::ToTokens for ConfigItem {
             static_token,
             ident,
             eq_token,
-            sources,
+            value,
             semi_token,
         } = self;
-        let value = sources.iter().map(|source| source.0.clone()).sum();
-
         let ConfigReprTokens {
             ty,
             expr,
@@ -93,43 +88,89 @@ impl quote::ToTokens for ConfigItem {
     }
 }
 
-impl syn::parse::Parse for ConfigSource {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let syn::Macro {
-            path: macro_path,
-            tokens: content_tokens,
-            ..
-        } = input.parse()?;
-        let macro_ident = macro_path.require_ident()?;
-        let content: syn::LitStr = syn::parse2(content_tokens)?;
-        let value = match macro_ident.to_string().as_str() {
-            "include_config" => {
-                let source_path = std::path::Path::new(input.span().file().as_str())
-                    .join("..")
-                    .join(content.value());
-                let format = Format::from_extension(
-                    source_path
-                        .extension()
-                        .unwrap_or_default()
+fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
+    match expr {
+        syn::Expr::Lit(syn::ExprLit {
+            attrs,
+            lit: syn::Lit::Str(text_lit),
+        }) => {
+            let format = match attrs.as_slice() {
+                [] => proc_macro_error::abort!(text_lit, "must specify format for literal config"),
+                [attribute] => {
+                    let specifier = attribute.meta.require_path_only()?.require_ident()?;
+                    Format::from_specifier(specifier.to_string().as_str())
+                        .unwrap_or_else(|| proc_macro_error::abort!(specifier, "unknown specifier"))
+                }
+                [_, attribute, ..] => {
+                    proc_macro_error::abort!(attribute, "multiple format specifier attributes")
+                }
+            };
+            Ok(format
+                .parse(text_lit.value().as_str())
+                .unwrap_or_else(|e| proc_macro_error::abort!(expr, e)))
+        }
+
+        syn::Expr::Macro(syn::ExprMacro { attrs, mac }) if mac.path.is_ident("include_config") => {
+            let path_lit: syn::LitStr = syn::parse2(mac.tokens.clone())?;
+            let path = resolve_path(path_lit.value().as_str());
+
+            // Resolve the relative path at the directory containing the call site file.
+            let path = if path.is_absolute() {
+                path
+            } else {
+                // Rust analyzer hasn't implemented `Span::file()`.
+                // https://github.com/rust-lang/rust-analyzer/issues/15950
+                std::path::Path::new(proc_macro2::Span::call_site().file().as_str())
+                    .parent()
+                    .unwrap_or_else(|| {
+                        proc_macro_error::abort!(path_lit, "cannot retrieve parent dir")
+                    })
+                    .join(path)
+            };
+
+            let format = match attrs.as_slice() {
+                [] => Format::from_extension(
+                    path.extension()
+                        .unwrap_or_else(|| proc_macro_error::abort!(path_lit, "unknown extension"))
                         .to_str()
-                        .unwrap_or_default(),
+                        .unwrap_or_else(|| proc_macro_error::abort!(path_lit, "unknown extension")),
                 )
                 .unwrap_or_else(|| {
-                    proc_macro_error::abort!(content, "cannot select format from extension")
-                });
-                let text = std::fs::read_to_string(source_path)
-                    .unwrap_or_else(|e| proc_macro_error::abort!(content, e));
-                format.parse(text.as_str())
-            }
-            format_ident => {
-                let format = Format::from_identifier(format_ident)
-                    .unwrap_or_else(|| proc_macro_error::abort!(macro_ident, "unknown identifier"));
-                format.parse(content.value().as_str())
-            }
+                    proc_macro_error::abort!(path_lit, "cannot select format from extension")
+                }),
+                [attribute] => {
+                    let specifier = attribute.meta.require_path_only()?.require_ident()?;
+                    Format::from_specifier(specifier.to_string().as_str())
+                        .unwrap_or_else(|| proc_macro_error::abort!(specifier, "unknown specifier"))
+                }
+                [_, attribute, ..] => {
+                    proc_macro_error::abort!(attribute, "multiple format specifier attributes")
+                }
+            };
+            let text = std::fs::read_to_string(path)
+                .unwrap_or_else(|e| proc_macro_error::abort!(path_lit, e));
+            Ok(format
+                .parse(text.as_str())
+                .unwrap_or_else(|e| proc_macro_error::abort!(expr, e)))
         }
-        .map_err(|e| input.error(e))?;
-        Ok(Self(value))
+
+        syn::Expr::Binary(binary) => {
+            Ok(value_from_expr(binary.left.as_ref())? + value_from_expr(binary.right.as_ref())?)
+        }
+
+        expr => proc_macro_error::abort!(
+            expr,
+            r#"expected `#[<format>] "<content>"` or `include_config!("<path>")`"#
+        ),
     }
+}
+
+// Replace `${ENV_VAR}` in paths.
+// Inspired by crate include_dir.
+fn resolve_path(s: &str) -> std::path::PathBuf {
+    let mut path = std::path::PathBuf::new();
+    path.push(s);
+    path
 }
 
 struct ConfigReprTokens {

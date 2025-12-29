@@ -11,7 +11,7 @@ pub fn parse(s: &str) -> Result<Value, Box<dyn Error>> {
 fn morph(value: yaml::Yaml) -> Value {
     match value {
         yaml::Yaml::Real(value) => value.parse().map(Value::Float).unwrap_or_else(|e| {
-            proc_macro_error::emit_call_site_error!(e);
+            proc_macro_error::emit_call_site_error!("yaml parsing error: {}", e);
             Value::Nil
         }),
         yaml::Yaml::Integer(value) => Value::Integer(value),

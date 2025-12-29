@@ -1,6 +1,5 @@
-use std::error::Error;
-
 use crate::value::Value;
+use std::error::Error;
 
 #[cfg(feature = "json")]
 pub mod json;
@@ -36,7 +35,7 @@ impl Format {
         }
     }
 
-    pub fn from_identifier(s: &str) -> Option<Self> {
+    pub fn from_specifier(s: &str) -> Option<Self> {
         match s {
             #[cfg(feature = "json")]
             "json" => Some(Self::Json),

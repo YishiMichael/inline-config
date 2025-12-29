@@ -1,6 +1,7 @@
 mod convert;
 mod key;
 
+#[doc(inline)]
 pub use inline_config_derive::{config, path, ConfigData, Path};
 
 pub trait Get<'c, P, T> {
