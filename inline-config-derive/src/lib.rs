@@ -37,5 +37,5 @@ pub fn Path(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 #[proc_macro_error::proc_macro_error]
 #[proc_macro_derive(ConfigData, attributes(config_data))]
 pub fn config_data(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(std::convert::identity::<config_data::ConfigData>, input)
+    delegate_macro(config_data::config_data, input)
 }

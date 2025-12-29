@@ -31,7 +31,7 @@ where
 }
 
 fn main() {
-    let v = MY_CONFIG.title;
+    let v = MY_CONFIG.name;
     println!("{:?}", v);
     let v: &str = MY_CONFIG.get(path!(name));
     println!("{:?}", v);

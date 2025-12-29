@@ -59,32 +59,15 @@ impl quote::ToTokens for ConfigItem {
             value,
             semi_token,
         } = self;
-        let ConfigReprTokens {
-            ty,
-            expr,
-            struct_items,
-            access_key_impls,
-            convert_into_impls,
-            non_nil_repr_impls,
-        } = ConfigReprTokens::from_value(&value, &quote::format_ident!("__{ident}_"), &vis);
+        let ConfigReprModule { item_mod, ty, expr } =
+            ConfigReprModule::from_value(ident, ident, &syn::parse_quote! { #ident }, &value);
 
+        item_mod.to_tokens(tokens);
         let static_item: syn::ItemStatic = syn::parse_quote! {
             #(#attrs)*
             #vis #static_token #ident: #ty #eq_token #expr #semi_token
         };
         static_item.to_tokens(tokens);
-        struct_items
-            .iter()
-            .for_each(|struct_item| struct_item.to_tokens(tokens));
-        access_key_impls
-            .iter()
-            .for_each(|access_key_impl| access_key_impl.to_tokens(tokens));
-        convert_into_impls
-            .iter()
-            .for_each(|convert_into_impl| convert_into_impl.to_tokens(tokens));
-        non_nil_repr_impls
-            .iter()
-            .for_each(|non_nil_repr_impl| non_nil_repr_impl.to_tokens(tokens));
     }
 }
 
@@ -171,265 +154,189 @@ fn resolve_path(s: &str) -> std::path::PathBuf {
     let mut path = std::path::PathBuf::new();
     path.push(s);
     path
+    // TODO
 }
 
-struct ConfigReprTokens {
+struct ConfigReprModule {
+    item_mod: syn::ItemMod,
     ty: syn::Type,
     expr: syn::Expr,
-    struct_items: Vec<syn::ItemStruct>,
-    access_key_impls: Vec<syn::ItemImpl>,
-    convert_into_impls: Vec<syn::ItemImpl>,
-    non_nil_repr_impls: Vec<syn::ItemImpl>,
 }
 
-impl ConfigReprTokens {
-    fn from_value(value: &Value, ident: &syn::Ident, vis: &syn::Visibility) -> Self {
+impl ConfigReprModule {
+    fn from_value(
+        ident: &syn::Ident,
+        mod_ident: &syn::Ident,
+        mod_path: &syn::Path,
+        value: &Value,
+    ) -> Self {
         match value {
-            Value::Nil => Self::primitive(syn::parse_quote! { () }, syn::parse_quote! { () }),
-            Value::Boolean(value) => {
-                Self::primitive(syn::parse_quote! { bool }, syn::parse_quote! { #value })
-            }
-            Value::Integer(value) => {
-                Self::primitive(syn::parse_quote! { i64 }, syn::parse_quote! { #value })
-            }
-            Value::Float(value) => {
-                Self::primitive(syn::parse_quote! { f64 }, syn::parse_quote! { #value })
-            }
-            Value::String(value) => Self::primitive(
+            Value::Nil => Self::from_primitive(
+                ident,
+                mod_ident,
+                syn::parse_quote! { () },
+                syn::parse_quote! { () },
+            ),
+            Value::Boolean(value) => Self::from_primitive(
+                ident,
+                mod_ident,
+                syn::parse_quote! { bool },
+                syn::parse_quote! { #value },
+            ),
+            Value::Integer(value) => Self::from_primitive(
+                ident,
+                mod_ident,
+                syn::parse_quote! { i64 },
+                syn::parse_quote! { #value },
+            ),
+            Value::Float(value) => Self::from_primitive(
+                ident,
+                mod_ident,
+                syn::parse_quote! { f64 },
+                syn::parse_quote! { #value },
+            ),
+            Value::String(value) => Self::from_primitive(
+                ident,
+                mod_ident,
                 syn::parse_quote! { &'static str },
                 syn::parse_quote! { #value },
             ),
-            Value::Array(value) => {
-                let (slots, values): (Vec<_>, Vec<_>) = value
-                    .iter()
-                    .enumerate()
-                    .map(|(index, value)| (ArraySlot { index }, value))
-                    .unzip();
-                Self::dispatch(slots, values.as_slice(), ident, vis)
+            Value::Array(value) => Self::from_array(ident, mod_ident, mod_path, value.into_iter()),
+            Value::Table(value) => Self::from_table(ident, mod_ident, mod_path, value.into_iter()),
+        }
+    }
+
+    fn from_primitive(
+        ident: &syn::Ident,
+        mod_ident: &syn::Ident,
+        ty: syn::Type,
+        expr: syn::Expr,
+    ) -> Self {
+        let item_mod = syn::parse_quote! {
+            #[allow(non_snake_case)]
+            pub mod #mod_ident {
+                #[allow(non_camel_case_types)]
+                pub type #ident = #ty;
             }
-            Value::Table(value) => {
-                let (slots, values): (Vec<_>, Vec<_>) = value
-                    .iter()
-                    .enumerate()
-                    .map(|(index, (name, value))| {
-                        (
-                            TableSlot {
-                                name,
-                                ident: syn::parse_str::<syn::Ident>(name)
-                                    .ok()
-                                    .filter(|_| !name.chars().all(|c| matches!(c, '0'..'9' | '_')))
-                                    .unwrap_or_else(|| quote::format_ident!("_{index}")),
-                            },
-                            value,
-                        )
-                    })
-                    .unzip();
-                Self::dispatch(slots, values.as_slice(), ident, vis)
-            }
-        }
+        };
+        let ty = syn::parse_quote! {
+            #mod_ident::#ident
+        };
+        Self { item_mod, ty, expr }
     }
 
-    fn primitive(ty: syn::Type, expr: syn::Expr) -> Self {
-        Self {
-            ty,
-            expr,
-            struct_items: [].into(),
-            access_key_impls: [].into(),
-            convert_into_impls: [].into(),
-            non_nil_repr_impls: [].into(),
-        }
-    }
-
-    fn dispatch<S>(
-        config_repr_structure: S,
-        values: &[&Value],
+    fn from_array<'v>(
         ident: &syn::Ident,
-        vis: &syn::Visibility,
-    ) -> Self
-    where
-        S: ConfigReprStructure,
-    {
-        let mut tys = Vec::new();
-        let mut exprs = Vec::new();
-        let mut struct_items = Vec::new();
-        let mut access_key_impls = Vec::new();
-        let mut convert_into_impls = Vec::new();
-        let mut non_nil_repr_impls = Vec::new();
-        for (index, value) in values.iter().enumerate() {
-            let Self {
-                ty: field_ty,
-                expr: field_expr,
-                struct_items: field_struct_items,
-                access_key_impls: field_access_key_impls,
-                convert_into_impls: field_convert_into_impls,
-                non_nil_repr_impls: field_non_nil_repr_impls,
-            } = Self::from_value(value, &quote::format_ident!("{ident}_{index}"), vis);
-            tys.push(field_ty);
-            exprs.push(field_expr);
-            struct_items.extend(field_struct_items);
-            access_key_impls.extend(field_access_key_impls);
-            convert_into_impls.extend(field_convert_into_impls);
-            non_nil_repr_impls.extend(field_non_nil_repr_impls);
-        }
-        struct_items.push(config_repr_structure.struct_item(ident, vis, tys.as_slice()));
-        access_key_impls.extend(config_repr_structure.access_key_impls(ident, tys.as_slice()));
-        convert_into_impls.extend(config_repr_structure.convert_into_impls(ident, tys.as_slice()));
-        non_nil_repr_impls.push(syn::parse_quote! {
-            impl ::inline_config::__private::NonNilRepr for #ident {}
-        });
-        Self {
-            ty: syn::parse_quote! {
-                #ident
-            },
-            expr: config_repr_structure.expr(ident, exprs.as_slice()),
-            struct_items,
-            access_key_impls,
-            convert_into_impls,
-            non_nil_repr_impls,
-        }
-    }
-}
-
-trait ConfigReprStructure {
-    fn expr(&self, ident: &syn::Ident, exprs: &[syn::Expr]) -> syn::Expr;
-    fn struct_item(
-        &self,
-        ident: &syn::Ident,
-        vis: &syn::Visibility,
-        tys: &[syn::Type],
-    ) -> syn::ItemStruct;
-    fn access_key_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl>;
-    fn convert_into_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl>;
-}
-
-struct ArraySlot {
-    index: usize,
-}
-
-struct TableSlot<'s> {
-    name: &'s str,
-    ident: syn::Ident,
-}
-
-impl ConfigReprStructure for Vec<ArraySlot> {
-    fn expr(&self, ident: &syn::Ident, exprs: &[syn::Expr]) -> syn::Expr {
-        syn::parse_quote! {
-            #ident(
-                #(#exprs,)*
-            )
-        }
-    }
-
-    fn struct_item(
-        &self,
-        ident: &syn::Ident,
-        vis: &syn::Visibility,
-        tys: &[syn::Type],
-    ) -> syn::ItemStruct {
-        syn::parse_quote! {
-            #vis struct #ident(
-                #(#vis #tys,)*
-            );
-        }
-    }
-
-    fn access_key_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl> {
-        self.iter()
-            .zip(tys)
-            .map(|(slot, ty)| {
-                let key_ty = Key::index_ty(slot.index);
-                let member = syn::Index::from(slot.index);
-                syn::parse_quote! {
-                    impl ::inline_config::__private::AccessKey<#key_ty> for #ident {
-                        type Repr = #ty;
-
-                        fn access_key(&self) -> &Self::Repr {
-                            &self.#member
-                        }
-                    }
-                }
+        mod_ident: &syn::Ident,
+        mod_path: &syn::Path,
+        value: impl Iterator<Item = &'v Value>,
+    ) -> Self {
+        let ((item_mods, (tys, exprs)), (key_tys, members)): (
+            (Vec<_>, (Vec<_>, Vec<_>)),
+            (Vec<_>, Vec<_>),
+        ) = value
+            .enumerate()
+            .map(|(index, value)| {
+                let mod_ident = quote::format_ident!("_{index}");
+                let ident = quote::format_ident!("{ident}_{index}");
+                let field_module = Self::from_value(
+                    &ident,
+                    &mod_ident,
+                    &syn::parse_quote! { #mod_path::#mod_ident },
+                    value,
+                );
+                (
+                    (field_module.item_mod, (field_module.ty, field_module.expr)),
+                    (Key::index_ty(index), syn::Member::from(index)),
+                )
             })
-            .collect()
-    }
-
-    fn convert_into_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl> {
-        let members = self.iter().map(|slot| syn::Index::from(slot.index));
+            .unzip();
         let lifetime = syn::Lifetime::new("'__inline_config__r", proc_macro2::Span::call_site());
         let generic = syn::Ident::new("__inline_config__T", proc_macro2::Span::call_site());
-        [
-            syn::parse_quote! {
-                impl<#lifetime, #generic>
-                    ::inline_config::__private::ConvertInto<#lifetime, Vec<#generic>> for #ident
-                where
-                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
-                {
-                    fn convert_into(&#lifetime self) -> Vec<#generic> {
-                        [
-                            #(
-                                <#tys as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::convert_into(&self.#members),
-                            )*
-                        ].into()
-                    }
+        let convert_into_impls: [syn::Item; _] = [syn::parse_quote! {
+            impl<#lifetime, #generic>
+                ::inline_config::__private::ConvertInto<#lifetime, Vec<#generic>> for #ident
+            where
+                #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>,)*
+            {
+                fn convert_into(&#lifetime self) -> Vec<#generic> {
+                    [
+                        #(
+                            <#tys as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::convert_into(&self.#members),
+                        )*
+                    ].into()
                 }
-            },
-        ].into()
-    }
-}
-
-impl ConfigReprStructure for Vec<TableSlot<'_>> {
-    fn expr(&self, ident: &syn::Ident, exprs: &[syn::Expr]) -> syn::Expr {
-        let members = self.iter().map(|slot| &slot.ident);
-        syn::parse_quote! {
-            #ident {
-                #(#members: #exprs,)*
             }
-        }
-    }
+        }];
+        let item_mod = syn::parse_quote! {
+            #[allow(non_snake_case)]
+            pub mod #mod_ident {
+                #(#item_mods)*
 
-    fn struct_item(
-        &self,
-        ident: &syn::Ident,
-        vis: &syn::Visibility,
-        tys: &[syn::Type],
-    ) -> syn::ItemStruct {
-        let members = self.iter().map(|slot| &slot.ident);
-        syn::parse_quote! {
-            #vis struct #ident {
-                #(#vis #members: #tys,)*
-            }
-        }
-    }
+                #[allow(non_camel_case_types)]
+                pub struct #ident(#(pub #tys),*);
 
-    fn access_key_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl> {
-        self.iter()
-            .zip(tys)
-            .map(|(slot, ty)| {
-                let key_ty = Key::name_ty(slot.name);
-                let member = &slot.ident;
-                syn::parse_quote! {
-                    impl ::inline_config::__private::AccessKey<#key_ty> for #ident {
-                        type Repr = #ty;
+                #(
+                    impl ::inline_config::__private::AccessKey<#key_tys> for #ident {
+                        type Repr = #tys;
 
                         fn access_key(&self) -> &Self::Repr {
-                            &self.#member
+                            &self.#members
                         }
                     }
-                }
-            })
-            .collect()
+                )*
+
+                #(#convert_into_impls)*
+
+                impl ::inline_config::__private::NonNilRepr for #ident {}
+            }
+        };
+        let ty = syn::parse_quote! {
+            #mod_ident::#ident
+        };
+        let expr = syn::parse_quote! {
+            #mod_path::#ident(#(#exprs),*)
+        };
+        Self { item_mod, ty, expr }
     }
 
-    fn convert_into_impls(&self, ident: &syn::Ident, tys: &[syn::Type]) -> Vec<syn::ItemImpl> {
-        let (names, members): (Vec<_>, Vec<_>) =
-            self.iter().map(|slot| (slot.name, &slot.ident)).unzip();
+    fn from_table<'v>(
+        ident: &syn::Ident,
+        mod_ident: &syn::Ident,
+        mod_path: &syn::Path,
+        value: impl Iterator<Item = (&'v String, &'v Value)>,
+    ) -> Self {
+        let ((item_mods, (tys, exprs)), (names, (key_tys, members))): (
+            (Vec<_>, (Vec<_>, Vec<_>)),
+            (Vec<_>, (Vec<_>, Vec<_>)),
+        ) = value
+            .enumerate()
+            .map(|(index, (name, value))| {
+                let mod_ident = syn::parse_str::<syn::Ident>(name)
+                    .ok()
+                    .filter(|_| !name.chars().all(|c| matches!(c, '0'..'9' | '_')))
+                    .unwrap_or_else(|| quote::format_ident!("_{index}"));
+                let ident = quote::format_ident!("{ident}_{index}");
+                let field_module = Self::from_value(
+                    &ident,
+                    &mod_ident,
+                    &syn::parse_quote! { #mod_path::#mod_ident },
+                    value,
+                );
+                (
+                    (field_module.item_mod, (field_module.ty, field_module.expr)),
+                    (name, (Key::name_ty(name), syn::Member::from(mod_ident))),
+                )
+            })
+            .unzip();
         let lifetime = syn::Lifetime::new("'__inline_config__r", proc_macro2::Span::call_site());
         let generic = syn::Ident::new("__inline_config__T", proc_macro2::Span::call_site());
-        [
+        let convert_into_impls: [syn::Item; _] = [
             syn::parse_quote! {
                 impl<#lifetime, #generic>
                     ::inline_config::__private::ConvertInto<#lifetime, ::std::collections::BTreeMap<&#lifetime str, #generic>> for #ident
                 where
-                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>,)*
                 {
                     fn convert_into(&#lifetime self) -> ::std::collections::BTreeMap<&#lifetime str, #generic> {
                         [
@@ -443,12 +350,11 @@ impl ConfigReprStructure for Vec<TableSlot<'_>> {
                     }
                 }
             },
-
             syn::parse_quote! {
                 impl<#lifetime, #generic>
                     ::inline_config::__private::ConvertInto<#lifetime, ::std::collections::BTreeMap<String, #generic>> for #ident
                 where
-                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>,)*
                 {
                     fn convert_into(&#lifetime self) -> ::std::collections::BTreeMap<String, #generic> {
                         [
@@ -462,13 +368,12 @@ impl ConfigReprStructure for Vec<TableSlot<'_>> {
                     }
                 }
             },
-
             #[cfg(feature = "indexmap")]
             syn::parse_quote! {
                 impl<#lifetime, #generic>
                     ::inline_config::__private::ConvertInto<#lifetime, ::indexmap::IndexMap<&#lifetime str, #generic>> for #ident
                 where
-                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>,)*
                 {
                     fn convert_into(&#lifetime self) -> ::indexmap::IndexMap<&#lifetime str, #generic> {
                         [
@@ -482,13 +387,12 @@ impl ConfigReprStructure for Vec<TableSlot<'_>> {
                     }
                 }
             },
-
             #[cfg(feature = "indexmap")]
             syn::parse_quote! {
                 impl<#lifetime, #generic>
                     ::inline_config::__private::ConvertInto<#lifetime, ::indexmap::IndexMap<String, #generic>> for #ident
                 where
-                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>),*
+                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>,)*
                 {
                     fn convert_into(&#lifetime self) -> ::indexmap::IndexMap<String, #generic> {
                         [
@@ -502,6 +406,40 @@ impl ConfigReprStructure for Vec<TableSlot<'_>> {
                     }
                 }
             },
-        ].into()
+        ];
+        let item_mod = syn::parse_quote! {
+            #[allow(non_snake_case)]
+            pub mod #mod_ident {
+                #(#item_mods)*
+
+                #[allow(non_camel_case_types)]
+                pub struct #ident {
+                    #(pub #members: #tys,)*
+                }
+
+                #(
+                    impl ::inline_config::__private::AccessKey<#key_tys> for #ident {
+                        type Repr = #tys;
+
+                        fn access_key(&self) -> &Self::Repr {
+                            &self.#members
+                        }
+                    }
+                )*
+
+                #(#convert_into_impls)*
+
+                impl ::inline_config::__private::NonNilRepr for #ident {}
+            }
+        };
+        let ty = syn::parse_quote! {
+            #mod_ident::#ident
+        };
+        let expr = syn::parse_quote! {
+            #mod_path::#ident {
+                #(#members: #exprs,)*
+            }
+        };
+        Self { item_mod, ty, expr }
     }
 }
