@@ -79,13 +79,13 @@ impl Key {
         // Referenced from frunk_proc_macro_helpers/lib.rs
         let tys = name.chars().map(|c| -> syn::Type {
             match c {
-                'A'..'Z' | 'a'..'z' => {
+                'A'..='Z' | 'a'..='z' => {
                     let ident = quote::format_ident!("{c}");
                     syn::parse_quote! {
                         ::inline_config::__private::chars::#ident
                     }
                 }
-                '0'..'9' | '_' => {
+                '0'..='9' | '_' => {
                     let ident = quote::format_ident!("_{c}");
                     syn::parse_quote! {
                         ::inline_config::__private::chars::#ident

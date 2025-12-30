@@ -94,7 +94,7 @@ pub fn config_data(input: syn::ItemStruct) -> ConfigDataImpls {
                     let attrs = ConfigDataFieldAttrs::from_field(field)
                         .unwrap_or_else(|e| proc_macro_error::abort_call_site!(e));
                     let name = attrs.rename.unwrap_or(ident.to_string());
-                    (ident, (Key::name_ty(name.as_str()), &field.ty))
+                    (ident, (Key::name_ty(&name), &field.ty))
                 })
                 .unzip();
             (

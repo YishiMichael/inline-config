@@ -81,7 +81,7 @@ fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
                 [] => proc_macro_error::abort!(text_lit, "must specify format for literal config"),
                 [attribute] => {
                     let specifier = attribute.meta.require_path_only()?.require_ident()?;
-                    Format::from_specifier(specifier.to_string().as_str())
+                    Format::from_specifier(&specifier.to_string())
                         .unwrap_or_else(|| proc_macro_error::abort!(specifier, "unknown specifier"))
                 }
                 [_, attribute, ..] => {
@@ -89,13 +89,23 @@ fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
                 }
             };
             Ok(format
-                .parse(text_lit.value().as_str())
+                .parse(&text_lit.value())
                 .unwrap_or_else(|e| proc_macro_error::abort!(expr, e)))
         }
 
-        syn::Expr::Macro(syn::ExprMacro { attrs, mac }) if mac.path.is_ident("include_config") => {
+        syn::Expr::Macro(syn::ExprMacro { attrs, mac }) => {
             let path_lit: syn::LitStr = syn::parse2(mac.tokens.clone())?;
-            let path = resolve_path(&path_lit);
+            let path = match mac.path.require_ident()?.to_string().as_str() {
+                "include_config" => std::path::PathBuf::from(path_lit.value()),
+                "include_config_env" => std::path::PathBuf::from(
+                    resolve_env(&path_lit.value())
+                        .unwrap_or_else(|e| proc_macro_error::abort!(path_lit, e)),
+                ),
+                _ => proc_macro_error::abort!(
+                    mac.path,
+                    "expected `include_config` or `include_config_env`"
+                ),
+            };
 
             // Resolve the relative path at the directory containing the call site file.
             let path = if path.is_absolute() {
@@ -103,7 +113,7 @@ fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
             } else {
                 // Rust analyzer hasn't implemented `Span::file()`.
                 // https://github.com/rust-lang/rust-analyzer/issues/15950
-                std::path::Path::new(proc_macro2::Span::call_site().file().as_str())
+                std::path::PathBuf::from(proc_macro2::Span::call_site().file())
                     .parent()
                     .unwrap_or_else(|| {
                         proc_macro_error::abort!(path_lit, "cannot retrieve parent dir")
@@ -123,7 +133,7 @@ fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
                 }),
                 [attribute] => {
                     let specifier = attribute.meta.require_path_only()?.require_ident()?;
-                    Format::from_specifier(specifier.to_string().as_str())
+                    Format::from_specifier(&specifier.to_string())
                         .unwrap_or_else(|| proc_macro_error::abort!(specifier, "unknown specifier"))
                 }
                 [_, attribute, ..] => {
@@ -133,7 +143,7 @@ fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
             let text = std::fs::read_to_string(path)
                 .unwrap_or_else(|e| proc_macro_error::abort!(path_lit, e));
             Ok(format
-                .parse(text.as_str())
+                .parse(&text)
                 .unwrap_or_else(|e| proc_macro_error::abort!(expr, e)))
         }
 
@@ -141,51 +151,37 @@ fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
             Ok(value_from_expr(binary.left.as_ref())? + value_from_expr(binary.right.as_ref())?)
         }
 
-        expr => proc_macro_error::abort!(
-            expr,
-            r#"expected `#[<format>] "<content>"` or `include_config!("<path>")`"#
-        ),
+        expr => proc_macro_error::abort!(expr, "expected string literal or macro invocation"),
     }
 }
 
-// Replace `${ENV_VAR}` in paths.
-// Inspired by crate include_dir.
-#[cfg(feature = "expand-env")]
-fn resolve_path(path_lit: &syn::LitStr) -> std::path::PathBuf {
-    let mut path = String::new();
-    let path_str = path_lit.value();
-    let mut chars = path_str.chars();
+// Replace `$ENV_VAR` in paths.
+// Inspired from `include_dir::resolve_env`.
+fn resolve_env(path: &str) -> Result<String, std::env::VarError> {
+    let mut chars = path.chars().peekable();
+    let mut resolved = String::new();
     while let Some(c) = chars.next() {
-        if c != '$' || chars.next() != Some('{') {
-            path.push(c);
+        if c != '$' {
+            resolved.push(c);
+            continue;
+        }
+        if chars.peek() == Some(&'$') {
+            chars.next();
+            resolved.push('$');
             continue;
         }
         let mut variable = String::new();
-        let mut depth = 0;
-        loop {
-            match chars.next() {
-                None => proc_macro_error::abort!(path_lit, "unclosed ${ENV_VAR}"),
-                Some('}') if depth == 0 => break,
-                Some(c) => {
-                    variable.push(c);
-                    match c {
-                        '{' => depth += 1,
-                        '}' => depth -= 1,
-                        _ => (),
-                    }
-                }
+        while let Some(&c) = chars.peek() {
+            if matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '_') {
+                chars.next();
+                variable.push(c);
+            } else {
+                break;
             }
         }
-        path.push_str(
-            &std::env::var(variable).unwrap_or_else(|e| proc_macro_error::abort!(path_lit, e)),
-        );
+        resolved.push_str(&std::env::var(&variable)?);
     }
-    path.into()
-}
-
-#[cfg(not(feature = "expand-env"))]
-fn resolve_path(path_lit: &syn::LitStr) -> std::path::PathBuf {
-    path_lit.value().into()
+    Ok(resolved)
 }
 
 struct ConfigReprModule {
@@ -345,10 +341,10 @@ impl ConfigReprModule {
             .map(|(index, (name, value))| {
                 let mod_ident = syn::parse_str::<syn::Ident>(name)
                     .ok()
-                    .or_else(|| syn::parse_str::<syn::Ident>(format!("r#{name}").as_str()).ok())
+                    .or_else(|| syn::parse_str::<syn::Ident>(&format!("r#{name}")).ok())
                     .filter(|_| {
                         !(name.chars().next() == Some('_')
-                            && name.chars().skip(1).all(|c| matches!(c, '0'..'9')))
+                            && name.chars().skip(1).all(|c| matches!(c, '0'..='9')))
                     })
                     .unwrap_or_else(|| quote::format_ident!("_{index}"));
                 let ident = quote::format_ident!("{ident}_{index}");

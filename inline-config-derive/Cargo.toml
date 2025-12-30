@@ -8,7 +8,6 @@ publish = false
 proc-macro = true
 
 [features]
-expand-env = []
 indexmap = ["dep:indexmap", "serde_json?/preserve_order", "toml?/preserve_order"]
 json = ["dep:serde_json"]
 toml = ["dep:toml"]
