@@ -155,7 +155,7 @@ fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
     }
 }
 
-// Replace `$ENV_VAR` in paths.
+// Resolve `$ENV_VAR` in a given path.
 // Inspired from `include_dir::resolve_env`.
 fn resolve_env(path: &str) -> Result<String, std::env::VarError> {
     let mut chars = path.chars().peekable();

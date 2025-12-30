@@ -31,8 +31,11 @@ version = "2.12.1"
 optional = true
 
 [[example]]
-name = "example"
+name = "basic"
 
 [[example]]
-name = "indexmap_example"
+name = "include"
+
+[[example]]
+name = "order"
 required-features = ["indexmap"]

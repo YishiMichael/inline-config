@@ -8,7 +8,6 @@ pub trait ConvertFrom<'r, R> {
 
 pub trait NonNilRepr {}
 pub trait NonNil {}
-pub trait ConfigData {}
 
 impl<'r, R, T> ConvertInto<'r, T> for R
 where
@@ -99,6 +98,3 @@ impl<T> NonNil for std::collections::BTreeMap<String, T> {}
 impl<T> NonNil for indexmap::IndexMap<&str, T> {}
 #[cfg(feature = "indexmap")]
 impl<T> NonNil for indexmap::IndexMap<String, T> {}
-
-impl<T> ConfigData for T where T: NonNil {}
-impl<T> ConfigData for Option<T> where T: NonNil {}
