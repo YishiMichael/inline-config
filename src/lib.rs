@@ -5,7 +5,7 @@
 //! Below is a basic example illustrating how to declare a static config item and access data from it.
 //!
 //! ```
-//! use inline_config::config;
+//! use inline_config::{Get, config, path};
 //!
 //! config! {
 //!     // Note, this looks like a typical static item declaration, but the type is omitted.
@@ -18,6 +18,9 @@
 //!         owner = "Tom"
 //!         timeout = 2000
 //!         ports = [ 8000, 8001, 8002 ]
+//!     "# + #[toml] r#"
+//!         [server]
+//!         timeout = 5000
 //!     "#;
 //! }
 //!
@@ -33,7 +36,7 @@
 //!
 //! // Any numerical types.
 //! let timeout: u32 = MY_CONFIG.get(path!(server.timeout));
-//! assert_eq!(2000, timeout);
+//! assert_eq!(5000, timeout);
 //! let timeout: f32 = MY_CONFIG.get(path!(server.timeout));
 //!
 //! // A homogeneous array can be accessed as `Vec<T>`.
@@ -103,7 +106,7 @@ mod key;
 ///
 /// A config block may contain any number of config items, in the form illustrated below:
 ///
-/// ```
+/// ```ignore
 /// config! {
 ///     /// Optional documents
 ///     #[optional_attributes]
@@ -122,10 +125,10 @@ mod key;
 /// Every `<SRC>` takes one of the following forms:
 ///
 /// * `#[toml] r#"name = "Tom""#` - an inline literal config. We require an attribute to specify the format of config.
-/// * `include_config!("example_config.toml")` - a file inclusion. The path is resolved in the directory containing the call site file (similar to `include_str!()`). The format specifier attribute may be omitted if it's clear from the file extension.
+/// * `include_config!("example_config.toml")` - a file inclusion. The path is resolved relative to the current file (similar to [`include_str!()`]). The format specifier attribute may be omitted if it's clear from the file extension.
 /// * `include_config_env!("$CARGO_MANIFEST_DIR/examples/example_config.toml")` - also a file inclusion, but environment variables of form `$ENV_VAR` are interpolated. Escape `$` with `$$`.
 ///
-/// The support of environment variable interpolation is to aid any code analyzer in locating files,
+/// The support of environment variable interpolation is to aid any code analyzer to locate files,
 /// as environment variables like `$CARGO_MANIFEST_DIR` and `$OUT_DIR` resolve to absolute paths.
 /// This is mostly inspired by [include_dir](https://docs.rs/include_dir/latest/include_dir/) crate.
 pub use inline_config_derive::config;
@@ -149,6 +152,8 @@ pub use inline_config_derive::Path;
 /// To avoid non-identifier key names occurred in source config (e.g. contains `-`), use `#[config_data(rename = "...")]` on certain fields.
 ///
 /// ```
+/// use inline_config::ConfigData;
+///
 /// #[derive(ConfigData)]
 /// struct MyStruct {
 ///     name: String, // matches "name"
@@ -159,7 +164,6 @@ pub use inline_config_derive::Path;
 /// ```
 pub use inline_config_derive::ConfigData;
 
-#[doc(inline)]
 pub use get::Get;
 
 #[doc(hidden)]

@@ -1,4 +1,5 @@
 # inline-config
+
 Effortlessly embed config as static data and access with any compatible data structures.
 <!-- TODO: badges here -->
 
@@ -6,6 +7,7 @@ A procedual macro `config!` is provided to parse sources at compile time, genera
 <!-- TODO: link to doc.rs items -->
 
 ## Features
+
 * JSON, YAML, TOML formats are supported.
 * Both inline literal configs and file inclusions are supported; overwriting is supported.
 * Compile-time source validation. Errors are clearly reported for easier debugging.
@@ -14,13 +16,16 @@ A procedual macro `config!` is provided to parse sources at compile time, genera
 * The feature flag `indexmap` enables preserving orders of tables. Check [this example](examples/order.rs) for details.
 
 ## Usage
-Add `inline-config` to your dependencies:
+
+Add `inline-config` to your dependencies
+
 ```cmd
 cargo add inline-config
 ```
 
 <!-- TODO: link to doc.rs items -->
 In your source file, declare a static variable using `config!` holding the config data
+
 ```rust
 use inline_config::config;
 
@@ -35,10 +40,15 @@ config! {
         owner = "Tom"
         timeout = 2000
         ports = [ 8000, 8001, 8002 ]
+    "# + #[toml] r#"
+        [server]
+        timeout = 5000
     "#;
 }
 ```
+
 Then, access the data inside using the `Get` trait in combination with the `path!` macro
+
 ```rust
 use inline_config::{Get, path};
 
@@ -54,7 +64,7 @@ assert_eq!("Tom", owner);
 
 // Any numerical types.
 let timeout: u32 = MY_CONFIG.get(path!(server.timeout));
-assert_eq!(2000, timeout);
+assert_eq!(5000, timeout);
 let timeout: f32 = MY_CONFIG.get(path!(server.timeout));
 
 // A homogeneous array can be accessed as `Vec<T>`.

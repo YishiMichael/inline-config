@@ -105,7 +105,7 @@ dependencies = [
 
 [[package]]
 name = "inline-config"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "indexmap",
  "inline-config-derive",
@@ -113,7 +113,7 @@ dependencies = [
 
 [[package]]
 name = "inline-config-derive"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "darling",
  "indexmap",

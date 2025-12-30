@@ -12,7 +12,9 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo build --all-targets --verbose
+      run: cargo build --all-targets
+    - name: Test
+      run: cargo test --all-features
     - name: Clippy
       run: cargo clippy --all-targets --all-features
     - name: Fmt

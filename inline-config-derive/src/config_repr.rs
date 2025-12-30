@@ -107,7 +107,7 @@ fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
                 ),
             };
 
-            // Resolve the relative path at the directory containing the call site file.
+            // Resolve the path relative to the current file.
             let path = if path.is_absolute() {
                 path
             } else {
