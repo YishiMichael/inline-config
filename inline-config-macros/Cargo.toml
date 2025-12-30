@@ -2,7 +2,14 @@
 name = "inline-config-macros"
 version = "0.1.0"
 edition = "2024"
-publish = false
+authors = ["YishiMichael (GitHub)"]
+license = "MIT OR Apache-2.0"
+description = "Procedual macros for inline-config"
+readme = "../README.md"
+homepage = "https://github.com/YishiMichael/inline-config"
+repository = "https://github.com/YishiMichael/inline-config"
+keywords = ["config", "include", "static", "inline"]
+categories = ["config", "data-structures"]
 
 [lib]
 proc-macro = true
