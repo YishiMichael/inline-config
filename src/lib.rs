@@ -3,7 +3,7 @@ mod get;
 mod key;
 
 #[doc(inline)]
-pub use inline_config_derive::{config, path, ConfigData, Path};
+pub use inline_config_derive::{ConfigData, Path, config, path};
 
 #[doc(inline)]
 pub use get::Get;

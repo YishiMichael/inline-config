@@ -60,7 +60,7 @@ impl quote::ToTokens for ConfigItem {
             semi_token,
         } = self;
         let ConfigReprModule { item_mod, ty, expr } =
-            ConfigReprModule::from_value(ident, ident, &syn::parse_quote! { #ident }, &value);
+            ConfigReprModule::from_value(ident, ident, &syn::parse_quote! { #ident }, value);
 
         item_mod.to_tokens(tokens);
         let static_item: syn::ItemStatic = syn::parse_quote! {
@@ -228,8 +228,8 @@ impl ConfigReprModule {
                 syn::parse_quote! { &'static str },
                 syn::parse_quote! { #value },
             ),
-            Value::Array(value) => Self::from_array(ident, mod_ident, mod_path, value.into_iter()),
-            Value::Table(value) => Self::from_table(ident, mod_ident, mod_path, value.into_iter()),
+            Value::Array(value) => Self::from_array(ident, mod_ident, mod_path, value.iter()),
+            Value::Table(value) => Self::from_table(ident, mod_ident, mod_path, value.iter()),
         }
     }
 
@@ -258,6 +258,7 @@ impl ConfigReprModule {
         mod_path: &syn::Path,
         value: impl Iterator<Item = &'v Value>,
     ) -> Self {
+        #[allow(clippy::type_complexity)]
         let ((item_mods, (tys, exprs)), (key_tys, members)): (
             (Vec<_>, (Vec<_>, Vec<_>)),
             (Vec<_>, Vec<_>),
@@ -333,6 +334,7 @@ impl ConfigReprModule {
         mod_path: &syn::Path,
         value: impl Iterator<Item = (&'v String, &'v Value)>,
     ) -> Self {
+        #[allow(clippy::type_complexity)]
         let ((item_mods, (tys, exprs)), (names, (key_tys, members))): (
             (Vec<_>, (Vec<_>, Vec<_>)),
             (Vec<_>, (Vec<_>, Vec<_>)),
@@ -343,8 +345,7 @@ impl ConfigReprModule {
                     .ok()
                     .or_else(|| syn::parse_str::<syn::Ident>(&format!("r#{name}")).ok())
                     .filter(|_| {
-                        !(name.chars().next() == Some('_')
-                            && name.chars().skip(1).all(|c| matches!(c, '0'..='9')))
+                        !(name.starts_with('_') && name.chars().skip(1).all(|c| c.is_ascii_digit()))
                     })
                     .unwrap_or_else(|| quote::format_ident!("_{index}"));
                 let ident = quote::format_ident!("{ident}_{index}");

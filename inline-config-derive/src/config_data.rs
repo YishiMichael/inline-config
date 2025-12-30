@@ -85,9 +85,12 @@ pub fn config_data(input: syn::ItemStruct) -> ConfigDataImpls {
                     let ident = field.ident.as_ref().unwrap();
                     let attrs = ConfigDataFieldAttrs::from_field(field)
                         .unwrap_or_else(|e| proc_macro_error::abort_call_site!(e));
-                    let name = attrs
-                        .rename
-                        .unwrap_or(syn::ext::IdentExt::unraw(ident).to_string());
+                    let name = attrs.rename.unwrap_or_else(|| {
+                        let name = ident.to_string();
+                        name.strip_prefix("r#")
+                            .map(ToOwned::to_owned)
+                            .unwrap_or(name)
+                    });
                     (ident, (Key::name_ty(&name), &field.ty))
                 })
                 .unzip();

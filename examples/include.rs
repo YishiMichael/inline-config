@@ -1,4 +1,4 @@
-use inline_config::{config, path, Get};
+use inline_config::{Get, config, path};
 
 config! {
     // Include from a config file adjacent to this file, similar to `include_str!()`.
@@ -10,6 +10,7 @@ config! {
     // Enable environment variable expansion by using `include_config_env`.
     // All `$ENV_VAR` will be replaced by corresponding environment varialbes.
     // Escape `$` by `$$`.
+    // This yields an absolute path which may help IDE better locate the file.
     pub static MY_CONFIG_ENV = include_config_env!("$CARGO_MANIFEST_DIR/examples/example_config.toml");
 
     // Included configs and inline configs can be arbitrarily composed.
@@ -18,7 +19,7 @@ config! {
         + #[toml] r#"
             [owner]
             name = "Tom"
-            dob = 1979-05-27
+            dob = "1979-05-27"
         "#;
 }
 

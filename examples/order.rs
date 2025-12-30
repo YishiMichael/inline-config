@@ -1,4 +1,4 @@
-use inline_config::{config, path, Get};
+use inline_config::{Get, config, path};
 
 config! {
     pub static MY_CONFIG = #[toml] r#"

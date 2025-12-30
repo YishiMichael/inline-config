@@ -1,14 +1,14 @@
-use inline_config::{config, path, ConfigData, Get, Path};
+use inline_config::{ConfigData, Get, Path, config, path};
 
 config! {
-    /// Edited from TOML official example
+    /// Edited from TOML official example.
     pub static TOML_EXAMPLE = #[toml] r#"
         title = "TOML Example"
 
         [owner]
         name = "Tom Preston-Werner"
-        dob = 1979-05-27
-        date-of-birth = 1979-05-27
+        dob = "1979-05-27"
+        date-of-birth = "1979-05-27"
         mod = "toml"
 
         [database]
@@ -81,6 +81,7 @@ fn container_types() {
     println!("{ports:?}");
 
     // Collect all items from a homogeneous table into a `BTreeMap`.
+    // See `order.rs` if the order of entries needs to be preserved.
     let languages: std::collections::BTreeMap<&str, u32> = TOML_EXAMPLE.get(path!(languages));
     println!("{languages:?}");
 }
@@ -90,7 +91,7 @@ fn user_types() {
 
     // Define a struct to match structured data from config.
     // Named structs corresponds to tables.
-    #[derive(Debug, ConfigData)]
+    #[derive(ConfigData, Debug)]
     struct Server {
         ip: String,
         dc: String,
@@ -105,7 +106,7 @@ fn user_types() {
 
     // Fields do not need to fully match. We only require all keys show up in the source data.
     // Generics supported.
-    #[derive(Debug, ConfigData)]
+    #[derive(ConfigData, Debug)]
     struct PartialServer<'a> {
         ip: &'a str,
     }
@@ -113,7 +114,7 @@ fn user_types() {
     println!("{partial_server:?}");
 
     // Field renaming supported. Needed if the key is not a valid rust identifier.
-    #[derive(Debug, ConfigData)]
+    #[derive(ConfigData, Debug)]
     struct Owner<S> {
         name: S, // matches "name"
         #[config_data(rename = "date-of-birth")]
@@ -123,8 +124,18 @@ fn user_types() {
     let owner: Owner<String> = TOML_EXAMPLE.get(path!(owner));
     println!("{owner:?}");
 
+    // Nesting supported.
+    #[derive(ConfigData, Debug)]
+    struct Root {
+        title: String,
+        owner: Owner<String>,
+    }
+    // An empty path fetches data at the root.
+    let root: Root = TOML_EXAMPLE.get(path!());
+    println!("{root:?}");
+
     // Unnamed structs corresponds to arrays.
-    #[derive(Debug, ConfigData)]
+    #[derive(ConfigData, Debug)]
     struct Hosts(String, String);
     let hosts: Hosts = TOML_EXAMPLE.get(path!(clients.hosts));
     println!("{hosts:?}");
@@ -132,6 +143,7 @@ fn user_types() {
 
 fn optional_types() {
     config! {
+        // Note, some formats like toml do not have null types.
         static JSON_CONFIG = #[json] r#"
         {
             "name": "Tom Preston-Werner",
@@ -156,7 +168,7 @@ fn optional_types() {
 
 fn overwrite() {
     config! {
-        // Chaining multiple config sources. The latter overwrites the former.
+        // Use `+` to chain multiple config sources. The latter overwrites the former.
         static CHAINED_CONFIG = #[json] r#"
         {
             "name": "Tom Preston-Werner",

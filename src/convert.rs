@@ -53,7 +53,7 @@ impl NonNil for bool {}
 
 impl<'r> ConvertFrom<'_, &'r str> for &'r str {
     fn convert_from(repr: &&'r str) -> Self {
-        *repr
+        repr
     }
 }
 
