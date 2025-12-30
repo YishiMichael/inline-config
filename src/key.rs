@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-// Borrowed from frunk_core::labelled::chars
+// Borrowed from `frunk_core::labelled::chars`.
 pub mod chars {
     macro_rules! create_enums_for {
         ($($c:tt)*) => {
@@ -17,7 +17,7 @@ pub mod chars {
         _0 _1 _2 _3 _4 _5 _6 _7 _8 _9 __
     );
 
-    // For unicode chars
+    // For unicode chars.
     pub struct UC<const CODEPOINT: u32>;
 }
 

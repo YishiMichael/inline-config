@@ -2,7 +2,7 @@
 name = "inline-config"
 version = "0.0.1"
 edition = "2024"
-authors = ["Michael Wang <mkys@umich.edu>"]
+authors = ["YishiMichael (GitHub)"]
 repository = "https://github.com/YishiMichael/inline-config"
 description = "Effortlessly embed config as static data and access with any compatible data structures."
 license = "MIT"
