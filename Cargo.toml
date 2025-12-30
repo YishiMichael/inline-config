@@ -1,33 +1,33 @@
+[workspace]
+resolver = "3"
+members = [
+    ".",
+    "inline-config-macros",
+]
+
 [package]
 name = "inline-config"
 version = "0.1.0"
 edition = "2024"
 authors = ["YishiMichael (GitHub)"]
 license = "MIT OR Apache-2.0"
-description = "Effortlessly embed config as static data and access with any compatible data structures."
+description = "Effortlessly embed config as static data and access with any compatible data structures"
 readme = "README.md"
 homepage = "https://github.com/YishiMichael/inline-config"
 repository = "https://github.com/YishiMichael/inline-config"
 keywords = ["config", "include", "static", "inline"]
 categories = ["config", "data-structures"]
 
-[workspace]
-resolver = "3"
-members = [
-    ".",
-    "inline-config-derive",
-]
-
 [features]
 default = ["json", "toml", "yaml"]
-indexmap = ["inline-config-derive/indexmap", "dep:indexmap"]
-json = ["inline-config-derive/json"]
-toml = ["inline-config-derive/toml"]
-yaml = ["inline-config-derive/yaml"]
+indexmap = ["inline-config-macros/indexmap", "dep:indexmap"]
+json = ["inline-config-macros/json"]
+toml = ["inline-config-macros/toml"]
+yaml = ["inline-config-macros/yaml"]
 
-[dependencies.inline-config-derive]
+[dependencies.inline-config-macros]
 version = "0.1.0"
-path = "inline-config-derive"
+path = "inline-config-macros"
 
 [dependencies.indexmap]
 version = "2.12.1"

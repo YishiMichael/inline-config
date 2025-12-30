@@ -108,11 +108,11 @@ name = "inline-config"
 version = "0.1.0"
 dependencies = [
  "indexmap",
- "inline-config-derive",
+ "inline-config-macros",
 ]
 
 [[package]]
-name = "inline-config-derive"
+name = "inline-config-macros"
 version = "0.1.0"
 dependencies = [
  "darling",

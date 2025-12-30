@@ -131,17 +131,17 @@ mod key;
 /// The support of environment variable interpolation is to aid any code analyzer to locate files,
 /// as environment variables like `$CARGO_MANIFEST_DIR` and `$OUT_DIR` resolve to absolute paths.
 /// This is mostly inspired by [include_dir](https://docs.rs/include_dir/latest/include_dir/) crate.
-pub use inline_config_derive::config;
+pub use inline_config_macros::config;
 
 /// Constructs a path with which one accesses a nested-in piece of data from config.
 ///
 /// A path can be constructed by a sequence of keys, separated by `.`.
 /// A key can be either an index (access an array field) or a name (access a table field).
 /// The name may be quoted if it is not a valid identifier (e.g. contains `-`).
-pub use inline_config_derive::path;
+pub use inline_config_macros::path;
 
 /// The type version of [`path`]. Used in type parameters of [`Get`].
-pub use inline_config_derive::Path;
+pub use inline_config_macros::Path;
 
 /// Defines a data structure that can be converted directly from a compatible container.
 ///
@@ -162,7 +162,7 @@ pub use inline_config_derive::Path;
 ///     r#mod: String, // matches "mod"
 /// }
 /// ```
-pub use inline_config_derive::ConfigData;
+pub use inline_config_macros::ConfigData;
 
 pub use get::Get;
 
