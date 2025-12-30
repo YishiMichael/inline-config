@@ -5,18 +5,29 @@ members = [
     "inline-config-macros",
 ]
 
-[package]
-name = "inline-config"
+[workspace.package]
 version = "0.1.0"
 edition = "2024"
 authors = ["YishiMichael (GitHub)"]
 license = "MIT OR Apache-2.0"
-description = "Effortlessly embed config as static data and access with any compatible data structures"
 readme = "README.md"
 homepage = "https://github.com/YishiMichael/inline-config"
 repository = "https://github.com/YishiMichael/inline-config"
 keywords = ["config", "include", "static", "inline"]
 categories = ["config", "data-structures"]
+
+[package]
+name = "inline-config"
+description = "Effortlessly embed config as static data and access with any compatible data structures"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+readme.workspace = true
+homepage.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
 
 [features]
 default = ["json", "toml", "yaml"]
