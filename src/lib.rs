@@ -44,7 +44,7 @@
 //! assert_eq!([8000, 8001, 8002].to_vec(), ports);
 //! ```
 //!
-//! See [`config`] and [`path`] for specs on those macros.
+//! See [`config!()`] and [`path!()`] for specs on those macros.
 //!
 //! ## Feature flags
 //!
@@ -67,13 +67,13 @@
 //! | Float | `f64` | `i8`, `i16`, `i32`, `i64`, `i128`, `isize`,<br>`u8`, `u16`, `u32`, `u64`, `u128`,<br>`usize`, `f32`, `f64` |
 //! | String | `&'static str` | `&str`, `String` |
 //! | Array | Structs with unnamed fields | `Vec<T>` if homogeneous,<br>User-defined structs with unnamed fields |
-//! | Table | Structs with named fields | `BTreeMap<&str, T>` if homogeneous,<br>`BTreeMap<String, T>` if homogeneous,<br>`IndexMap<&str, T>` if homogeneous*,<br>`IndexMap<String, T>` if homogeneous*,<br>User-defined structs with named fields |
+//! | Table | Structs with named fields | `BTreeMap<&str, T>` if homogeneous,<br>`BTreeMap<String, T>` if homogeneous,<br>`IndexMap<&str, T>` if homogeneous[^1],<br>`IndexMap<String, T>` if homogeneous[^1],<br>User-defined structs with named fields |
 //!
-//! * Only available when enabling `indexmap` feature flag.
+//! [^1]: Only available when enabling `indexmap` feature flag.
 //!
 //! ### Container types
 //!
-//! Arrays and tables are both "containers" in the sense of containing children data, therefore you can use [`path`] to access children data.
+//! Arrays and tables are both "containers" in the sense of containing children data, therefore you can use [`path!()`] to access children data.
 //! The only difference between the two containers is that arrays have unnamed but ordered fields, while tables have named but unamed fields.
 //! This suggests you should use indices when accessing a field of an array, but use names when accessing a field of a table.
 //!
@@ -140,7 +140,7 @@ pub use inline_config_macros::config;
 /// The name may be quoted if it is not a valid identifier (e.g. contains `-`).
 pub use inline_config_macros::path;
 
-/// The type version of [`path`]. Used in type parameters of [`Get`].
+/// The type version of [`path!()`]. Used in type parameters of [`Get`].
 pub use inline_config_macros::Path;
 
 /// Defines a data structure that can be converted directly from a compatible container.

@@ -1,10 +1,13 @@
 # inline-config
 
 Effortlessly embed config as static data and access with any compatible data structures.
-<!-- TODO: badges here -->
 
-A procedual macro `config!` is provided to parse sources at compile time, generate static data structures, from which we can access values via the `Get` trait. The output types of accessed values can be almost "at will", as long as they are compatible.
-<!-- TODO: link to doc.rs items -->
+[![Version](https://img.shields.io/crates/v/inline-config?style=for-the-badge)](https://crates.io/crates/inline-config)
+[![License](https://img.shields.io/crates/l/inline-config?style=for-the-badge)](https://github.com/cptpiepmatz/inline-config/blob/main/LICENSE)
+[![Docs](https://img.shields.io/docsrs/inline-config?style=for-the-badge&logo=docs.rs)](https://docs.rs/inline-config)
+[![CI](https://img.shields.io/github/actions/workflow/status/YishiMichael/inline-config/rust.yml?style=for-the-badge&logo=github&label=CI)](https://docs.rs/inline-config)
+
+A procedual macro [`config!()`](https://docs.rs/inline-config/latest/inline_config/macro.config.html) is provided to parse sources at compile time, generate static data structures, from which we can access values via the [`Get`](https://docs.rs/inline-config/latest/inline_config/trait.Get.html) trait. The output types of accessed values can be almost "at will", as long as they are compatible.
 
 ## Features
 
@@ -23,8 +26,7 @@ Add `inline-config` to your dependencies
 cargo add inline-config
 ```
 
-<!-- TODO: link to doc.rs items -->
-In your source file, declare a static variable using `config!` holding the config data
+In your source file, declare a static variable using [`config!()`](https://docs.rs/inline-config/latest/inline_config/macro.config.html) holding the config data
 
 ```rust
 use inline_config::config;
@@ -47,7 +49,7 @@ config! {
 }
 ```
 
-Then, access the data inside using the `Get` trait in combination with the `path!` macro
+Then, access the data inside using the [`Get`](https://docs.rs/inline-config/latest/inline_config/trait.Get.html) trait in combination with the [`path!`](https://docs.rs/inline-config/latest/inline_config/macro.path.html) macro
 
 ```rust
 use inline_config::{Get, path};
