@@ -19,7 +19,7 @@ default = ["json", "toml", "yaml"]
 indexmap = ["dep:indexmap", "serde_json?/preserve_order", "toml?/preserve_order"]
 json = ["dep:serde_json"]
 toml = ["dep:toml"]
-yaml = ["dep:yaml-rust2"]
+yaml = ["dep:serde_yaml"]
 
 [dependencies.darling]
 version = "0.23.0"
@@ -50,6 +50,6 @@ version = "0.9.10"
 features = ["parse", "serde"]
 optional = true
 
-[dependencies.yaml-rust2]
-version = "0.11.0"
+[dependencies.serde_yaml]
+version = "0.9.34"
 optional = true

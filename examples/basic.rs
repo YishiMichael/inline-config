@@ -1,4 +1,4 @@
-use inline_config::{ConfigData, Get, Path, config, path};
+use inline_config::{config, path, ConfigData, Get, Path};
 
 config! {
     /// Edited from TOML official example.
@@ -37,6 +37,14 @@ config! {
         yaml = 2001
         toml = 2013
     "#;
+
+    // pub static YAML_EXAMPLE = #[yaml] r#"
+    //     ---
+    //     a: 1
+    //     b:
+    //       c: 3
+    //     ...
+    // "#;
 }
 
 fn primitive_types() {
