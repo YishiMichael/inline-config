@@ -1,8 +1,8 @@
-use inline_config::{config, path, ConfigData, Get, Path};
+use inline_config::{ConfigData, Get, Path, config, path};
 
 config! {
     /// Edited from TOML official example.
-    pub static TOML_EXAMPLE = #[toml] r#"
+    pub static TOML_EXAMPLE: TomlExample = #[toml] r#"
         title = "TOML Example"
 
         [owner]
@@ -37,14 +37,6 @@ config! {
         yaml = 2001
         toml = 2013
     "#;
-
-    // pub static YAML_EXAMPLE = #[yaml] r#"
-    //     ---
-    //     a: 1
-    //     b:
-    //       c: 3
-    //     ...
-    // "#;
 }
 
 fn primitive_types() {
@@ -152,7 +144,7 @@ fn user_types() {
 fn optional_types() {
     config! {
         // Note, some formats like toml do not have null types.
-        static JSON_CONFIG = #[json] r#"
+        static JSON_CONFIG: _ = #[json] r#"
         {
             "name": "Tom Preston-Werner",
             "preferred-name": null,
@@ -177,7 +169,7 @@ fn optional_types() {
 fn overwrite() {
     config! {
         // Use `+` to chain multiple config sources. The latter overwrites the former.
-        static CHAINED_CONFIG = #[json] r#"
+        static CHAINED_CONFIG: _ = #[json] r#"
         {
             "name": "Tom Preston-Werner",
             "preferred-name": null
@@ -201,14 +193,14 @@ fn overwrite() {
 
 fn get_trait() {
     config! {
-        static PRIMARY_CONFIG = #[json] r#"
+        static PRIMARY_CONFIG: _ = #[json] r#"
         {
             "name": "Tom Preston-Werner",
             "preferred-name": null
         }
         "#;
 
-        static CHAINED_CONFIG = #[json] r#"
+        static CHAINED_CONFIG: _ = #[json] r#"
         {
             "name": "Tom Preston-Werner",
             "preferred-name": null
@@ -223,10 +215,10 @@ fn get_trait() {
 
     // After overwriting, the two configs have different types.
     // The `Get` trait modeled their shared data-getting behavior.
-    fn get_names<'c, C>(config: &'c C) -> (String, Option<String>)
+    fn get_names<C>(config: &'static C) -> (String, Option<String>)
     where
-        C: Get<'c, Path!(name), String>,
-        C: Get<'c, Path!("preferred-name"), Option<String>>,
+        C: Get<Path!(name), String>,
+        C: Get<Path!("preferred-name"), Option<String>>,
     {
         (config.get(path!(name)), config.get(path!("preferred-name")))
     }

@@ -9,7 +9,13 @@ pub fn parse(s: &str) -> Result<Value, Box<dyn Error>> {
 fn morph(value: toml::Value) -> Result<Value, Box<dyn Error>> {
     Ok(match value {
         toml::Value::String(value) => Value::String(value),
-        toml::Value::Integer(value) => Value::Integer(value),
+        toml::Value::Integer(value) => {
+            if value.is_negative() {
+                Value::NegInt(value)
+            } else {
+                Value::PosInt(value as u64)
+            }
+        }
         toml::Value::Float(value) => Value::Float(value),
         toml::Value::Boolean(value) => Value::Boolean(value),
         toml::Value::Datetime(value) => Value::String(value.to_string()),

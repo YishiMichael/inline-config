@@ -8,10 +8,11 @@
 //! use inline_config::{Get, config, path};
 //!
 //! config! {
-//!     // Note, this looks like a typical static item declaration, but the type is omitted.
+//!     // Just looks like a typical static item declaration.
+//!     // Apart from the static item, a type `MyConfig` will be generated as well.
 //!     // `#[toml]` is needed to specify the format of this source.
 //!     // Including a file from disk is also possible, see `examples/include.rs`
-//!     pub static MY_CONFIG = #[toml] r#"
+//!     pub static MY_CONFIG: MyConfig = #[toml] r#"
 //!         title = "TOML example"
 //!
 //!         [server]
@@ -55,21 +56,24 @@
 //!
 //! ## Compatible types
 //!
-//! Internally, data from config sources are parsed into one of the seven variants:
-//! null, booleans, integers, floats, strings, arrays, tables.
+//! Internally, data from config sources are parsed into one of the eight variants:
+//! nil, booleans, unsigned integers, signed integers, floats, strings, arrays, tables.
 //! Each of them has a specific storage representation, and have different compatible types.
 //!
 //! | Representation variant | Storage | Compatible types |
 //! |---|---|---|
-//! | Null | `()` | (See [option types](#option-types)) |
+//! | Nil | `()` | (See [option types](#option-types)) |
 //! | Boolean | `bool` | `bool` |
-//! | Integer | `i64` | `i8`, `i16`, `i32`, `i64`, `i128`, `isize`,<br>`u8`, `u16`, `u32`, `u64`, `u128`,<br>`usize`, `f32`, `f64` |
-//! | Float | `f64` | `i8`, `i16`, `i32`, `i64`, `i128`, `isize`,<br>`u8`, `u16`, `u32`, `u64`, `u128`,<br>`usize`, `f32`, `f64` |
+//! | Unsigned Integer | `u64` | `i8`, `i16`, `i32`, `i64`, `i128`, `isize`,<br>`u8`, `u16`, `u32`, `u64`, `u128`, `usize`,<br>`f32`, `f64` |
+//! | Signed Integer | `i64` | `i8`, `i16`, `i32`, `i64`, `i128`, `isize`,<br>`f32`, `f64` |
+//! | Float | `OrderedFloat<f64>`<sup>1</sup> | `f32`, `f64` |
 //! | String | `&'static str` | `&str`, `String` |
-//! | Array | Structs with unnamed fields | `Vec<T>` if homogeneous,<br>User-defined structs with unnamed fields |
-//! | Table | Structs with named fields | `BTreeMap<&str, T>` if homogeneous,<br>`BTreeMap<String, T>` if homogeneous,<br>`IndexMap<&str, T>` if homogeneous[^1],<br>`IndexMap<String, T>` if homogeneous[^1],<br>User-defined structs with named fields |
+//! | Array | Structs | `Vec<T>` if homogeneous,<br>User-defined structs with unnamed fields |
+//! | Table | Structs | `BTreeMap<&str, T>` if homogeneous,<br>`BTreeMap<String, T>` if homogeneous,<br>`IndexMap<&str, T>` if homogeneous<sup>2</sup>,<br>`IndexMap<String, T>` if homogeneous<sup>2</sup>,<br>User-defined structs with named fields |
 //!
-//! [^1]: Only available when enabling `indexmap` feature flag.
+//! Footnotes:
+//! 1. `f64` does not implement `Eq`, `Ord`, `Hash` traits, but [`ordered_float::OrderedFloat<f64>`] does.
+//! 2. Only available when enabling `indexmap` feature flag.
 //!
 //! ### Container types
 //!
@@ -99,8 +103,8 @@
 //! and the result will be additionally wrapped by a `Some`.
 
 mod convert;
-mod get;
 mod key;
+mod repr;
 
 /// Declares static variables containing config data.
 ///
@@ -108,17 +112,22 @@ mod key;
 ///
 /// ```ignore
 /// config! {
-///     /// Optional documents
-///     #[optional_attributes]
-///     <VIS> static <IDENT> = <SRC>;
-///
-///     /// Optional documents
-///     #[optional_attributes]
-///     <VIS> static <IDENT> = <SRC> + <SRC> + <SRC>;
+///     <VIS> static <IDENT>: <TYPE> = <SRC>;
+///     <VIS> static <IDENT>: <TYPE> = <SRC> + <SRC> + <SRC>;
+///     <VIS> static <IDENT>: _ = <SRC>;
+///     <VIS> static <IDENT>: _ = <SRC> + <SRC> + <SRC>;
 /// }
 /// ```
 ///
-/// Each declaration is simply a typical static item, except that the type is omitted.
+/// Each declaration is simply a typical static item with a possibly ellided type.
+/// The `<IDENT>`s shall not collide; `<TYPE>`s may collide.
+/// After expansion the following symbols are brought into scope:
+///
+/// * Static items, one for each `<IDENT>`;
+/// * Type items, one for each unique `<TYPE>`, one for each `__<IDENT>` whose type is ellided;
+/// * Mod items, one for each `__<IDENT:lower>`.
+///
+/// Those prefixed with double underscores are only meant for internal usage only.
 ///
 /// The expression part looks like a sum of sources.
 /// This is where overwriting takes place. All variants are completely overwritten except for tables, which got merged recursively.
@@ -164,10 +173,23 @@ pub use inline_config_macros::Path;
 /// ```
 pub use inline_config_macros::ConfigData;
 
-pub use get::Get;
+/// A trait modeling type compatibility.
+///
+/// A type bound `C: Get<P, T>` means the data at path `P` from config `C` is compatible with and can be converted into `T`.
+///
+/// This trait is not meant to be custom implemented; all implementations are induced from `config!()` macro.
+pub trait Get<P, T> {
+    fn get(&'static self, path: P) -> T;
+}
 
 #[doc(hidden)]
 pub mod __private {
     pub use crate::convert::*;
     pub use crate::key::*;
+    pub use crate::repr::*;
+
+    pub use ordered_float::OrderedFloat;
+
+    #[cfg(feature = "indexmap")]
+    pub use indexmap::IndexMap;
 }

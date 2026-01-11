@@ -1,16 +1,12 @@
-#[cfg(not(feature = "indexmap"))]
-type Map<K, V> = std::collections::BTreeMap<K, V>;
-#[cfg(feature = "indexmap")]
-type Map<K, V> = indexmap::IndexMap<K, V>;
-
 pub enum Value {
     Nil,
     Boolean(bool),
-    Integer(i64),
+    PosInt(u64),
+    NegInt(i64),
     Float(f64),
     String(String),
     Array(Vec<Self>),
-    Table(Map<String, Self>),
+    Table(indexmap::IndexMap<String, Self>),
 }
 
 impl std::ops::AddAssign for Value {
@@ -19,7 +15,7 @@ impl std::ops::AddAssign for Value {
             (Self::Table(old), Self::Table(new)) => {
                 for (key, new_value) in new {
                     old.entry(key)
-                        .or_insert(Value::Table(Map::new()))
+                        .or_insert(Value::Table(indexmap::IndexMap::new()))
                         .add_assign(new_value);
                 }
             }
@@ -41,6 +37,6 @@ impl std::ops::Add for Value {
 
 impl std::iter::Sum for Value {
     fn sum<I: Iterator<Item = Self>>(iter: I) -> Self {
-        iter.fold(Value::Table(Map::new()), std::ops::Add::add)
+        iter.fold(Value::Table(indexmap::IndexMap::new()), std::ops::Add::add)
     }
 }

@@ -9,18 +9,17 @@ pub struct ConfigItems {
 struct ConfigItem {
     attrs: Vec<syn::Attribute>,
     vis: syn::Visibility,
-    static_token: syn::Token![static],
+    mutability: syn::StaticMutability,
     ident: syn::Ident,
-    eq_token: syn::Token![=],
+    ty: Option<syn::Ident>,
     value: Value,
-    semi_token: syn::Token![;],
 }
 
 impl syn::parse::Parse for ConfigItems {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         let mut items = vec![];
         while !input.is_empty() {
-            items.push(input.parse()?);
+            items.push(ConfigItem::from_item_static(input.parse()?)?);
         }
         Ok(Self { items })
     }
@@ -28,450 +27,402 @@ impl syn::parse::Parse for ConfigItems {
 
 impl quote::ToTokens for ConfigItems {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        self.items
-            .iter()
-            .for_each(|config_item| config_item.to_tokens(tokens));
+        let mut groups = indexmap::IndexMap::new();
+        self.items.iter().for_each(
+            |ConfigItem {
+                 attrs,
+                 vis,
+                 mutability,
+                 ident,
+                 ty,
+                 value,
+             }| {
+                let ty = ty.clone().unwrap_or(quote::format_ident!("__{ident}"));
+                let mod_ident = quote::format_ident!("__{}", ident.to_string().to_lowercase());
+                let item_static: syn::ItemStatic = syn::parse_quote! {
+                    #(#attrs)*
+                    #vis #mutability static #ident: #ty = #ty::#mod_ident(#mod_ident::EXPR);
+                };
+                item_static.to_tokens(tokens);
+                ConfigReprMod::from_value(value)
+                    .item_mod(&mod_ident)
+                    .to_tokens(tokens);
+                groups.entry(ty).or_insert_with(Vec::new).push(mod_ident);
+            },
+        );
+        groups.iter().for_each(|(ty, idents)| {
+            let item_enum: syn::ItemEnum = syn::parse_quote! {
+                #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+                #[allow(non_camel_case_types)]
+                pub enum #ty {
+                    #(#idents(#idents::Type),)*
+                }
+            };
+            let get_impl: syn::ItemImpl = syn::parse_quote! {
+                impl<P, T> ::inline_config::Get<P, T> for #ty
+                where
+                    #(
+                        #idents::Type: ::inline_config::__private::AccessPath<P>,
+                        <#idents::Type as ::inline_config::__private::AccessPath<P>>::Repr: ::inline_config::__private::ConvertRepr<T>,
+                    )*
+                {
+                    fn get(&'static self, _path: P) -> T {
+                        match self {#(
+                            Self::#idents(value) => <
+                                <#idents::Type as ::inline_config::__private::AccessPath<P>>::Repr as ::inline_config::__private::ConvertRepr<T>
+                            >::convert_repr(
+                                <#idents::Type as ::inline_config::__private::AccessPath<P>>::access_path(
+                                    value,
+                                ),
+                            ),
+                        )*}
+                    }
+                }
+            };
+            item_enum.to_tokens(tokens);
+            get_impl.to_tokens(tokens);
+        });
     }
 }
 
-impl syn::parse::Parse for ConfigItem {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+impl ConfigItem {
+    fn from_item_static(item_static: syn::ItemStatic) -> syn::Result<Self> {
         Ok(Self {
-            attrs: input.call(syn::Attribute::parse_outer)?,
-            vis: input.parse()?,
-            static_token: input.parse()?,
-            ident: input.parse()?,
-            eq_token: input.parse()?,
-            value: value_from_expr(&input.parse()?)?,
-            semi_token: input.parse()?,
+            attrs: item_static.attrs,
+            vis: item_static.vis,
+            mutability: item_static.mutability,
+            ident: item_static.ident,
+            ty: match &*item_static.ty {
+                syn::Type::Path(syn::TypePath { qself: None, path }) => {
+                    Ok(Some(path.require_ident()?.clone()))
+                }
+                syn::Type::Infer(_) => Ok(None),
+                _ => Err(syn::Error::new_spanned(
+                    item_static.ty,
+                    "config type must be an identifier",
+                )),
+            }?,
+            value: Self::value_from_expr(*item_static.expr)?,
         })
     }
-}
 
-impl quote::ToTokens for ConfigItem {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let ConfigItem {
-            attrs,
-            vis,
-            static_token,
-            ident,
-            eq_token,
-            value,
-            semi_token,
-        } = self;
-        let ConfigReprModule { item_mod, ty, expr } =
-            ConfigReprModule::from_value(ident, ident, &syn::parse_quote! { #ident }, value);
-
-        item_mod.to_tokens(tokens);
-        let static_item: syn::ItemStatic = syn::parse_quote! {
-            #(#attrs)*
-            #vis #static_token #ident: #ty #eq_token #expr #semi_token
-        };
-        static_item.to_tokens(tokens);
-    }
-}
-
-fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
-    match expr {
-        syn::Expr::Lit(syn::ExprLit {
-            attrs,
-            lit: syn::Lit::Str(text_lit),
-        }) => {
-            let format = match attrs.as_slice() {
-                [] => proc_macro_error::abort!(text_lit, "must specify format for literal config"),
-                [attribute] => {
-                    let specifier = attribute.meta.require_path_only()?.require_ident()?;
-                    Format::from_specifier(&specifier.to_string())
-                        .unwrap_or_else(|| proc_macro_error::abort!(specifier, "unknown specifier"))
-                }
-                [_, attribute, ..] => {
-                    proc_macro_error::abort!(attribute, "multiple format specifier attributes")
-                }
-            };
-            Ok(format
-                .parse(&text_lit.value())
-                .unwrap_or_else(|e| proc_macro_error::abort!(expr, e)))
-        }
-
-        syn::Expr::Macro(syn::ExprMacro { attrs, mac }) => {
-            let path_lit: syn::LitStr = syn::parse2(mac.tokens.clone())?;
-            let path = match mac.path.require_ident()?.to_string().as_str() {
-                "include_config" => std::path::PathBuf::from(path_lit.value()),
-                "include_config_env" => std::path::PathBuf::from(
-                    resolve_env(&path_lit.value())
-                        .unwrap_or_else(|e| proc_macro_error::abort!(path_lit, e)),
-                ),
-                _ => proc_macro_error::abort!(
-                    mac.path,
-                    "expected `include_config` or `include_config_env`"
-                ),
-            };
-
-            // Resolve the path relative to the current file.
-            let path = if path.is_absolute() {
-                path
-            } else {
-                // Rust analyzer hasn't implemented `Span::file()`.
-                // https://github.com/rust-lang/rust-analyzer/issues/15950
-                std::path::PathBuf::from(proc_macro2::Span::call_site().file())
-                    .parent()
-                    .unwrap_or_else(|| {
-                        proc_macro_error::abort!(path_lit, "cannot retrieve parent dir")
-                    })
-                    .join(path)
-            };
-
-            let format = match attrs.as_slice() {
-                [] => Format::from_extension(
-                    path.extension()
-                        .unwrap_or_else(|| proc_macro_error::abort!(path_lit, "unknown extension"))
-                        .to_str()
-                        .unwrap_or_else(|| proc_macro_error::abort!(path_lit, "unknown extension")),
-                )
-                .unwrap_or_else(|| {
-                    proc_macro_error::abort!(path_lit, "cannot select format from extension")
-                }),
-                [attribute] => {
-                    let specifier = attribute.meta.require_path_only()?.require_ident()?;
-                    Format::from_specifier(&specifier.to_string())
-                        .unwrap_or_else(|| proc_macro_error::abort!(specifier, "unknown specifier"))
-                }
-                [_, attribute, ..] => {
-                    proc_macro_error::abort!(attribute, "multiple format specifier attributes")
-                }
-            };
-            let text = std::fs::read_to_string(path)
-                .unwrap_or_else(|e| proc_macro_error::abort!(path_lit, e));
-            Ok(format
-                .parse(&text)
-                .unwrap_or_else(|e| proc_macro_error::abort!(expr, e)))
-        }
-
-        syn::Expr::Binary(binary) => {
-            Ok(value_from_expr(binary.left.as_ref())? + value_from_expr(binary.right.as_ref())?)
-        }
-
-        expr => proc_macro_error::abort!(expr, "expected string literal or macro invocation"),
-    }
-}
-
-// Resolve `$ENV_VAR` in a given path.
-// Inspired from `include_dir::resolve_env`.
-fn resolve_env(path: &str) -> Result<String, std::env::VarError> {
-    let mut chars = path.chars().peekable();
-    let mut resolved = String::new();
-    while let Some(c) = chars.next() {
-        if c != '$' {
-            resolved.push(c);
-            continue;
-        }
-        if chars.peek() == Some(&'$') {
-            chars.next();
-            resolved.push('$');
-            continue;
-        }
-        let mut variable = String::new();
-        while let Some(&c) = chars.peek() {
-            if matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '_') {
-                chars.next();
-                variable.push(c);
-            } else {
-                break;
+    fn value_from_expr(expr: syn::Expr) -> syn::Result<Value> {
+        let expr_span = syn::spanned::Spanned::span(&expr);
+        match expr {
+            syn::Expr::Lit(syn::ExprLit {
+                attrs,
+                lit: syn::Lit::Str(text_lit),
+            }) => {
+                let format = match attrs.as_slice() {
+                    [] => Err(syn::Error::new_spanned(
+                        &text_lit,
+                        "must specify format for literal config",
+                    )),
+                    [attribute] => {
+                        let specifier = attribute.meta.require_path_only()?.require_ident()?;
+                        Format::from_specifier(&specifier.to_string())
+                            .ok_or(syn::Error::new_spanned(specifier, "unknown specifier"))
+                    }
+                    [_, attribute, ..] => Err(syn::Error::new_spanned(
+                        attribute,
+                        "multiple format specifier attributes",
+                    )),
+                }?;
+                format
+                    .parse(&text_lit.value())
+                    .map_err(|e| syn::Error::new(expr_span, e))
             }
+
+            syn::Expr::Macro(syn::ExprMacro { attrs, mac }) => {
+                let path_lit: syn::LitStr = syn::parse2(mac.tokens)?;
+                let path = match mac.path.require_ident()?.to_string().as_str() {
+                    "include_config" => Ok(std::path::PathBuf::from(path_lit.value())),
+                    "include_config_env" => Self::resolve_env(&path_lit.value())
+                        .map(std::path::PathBuf::from)
+                        .map_err(|e| syn::Error::new_spanned(&path_lit, e)),
+                    _ => Err(syn::Error::new_spanned(
+                        &mac.path,
+                        "expected `include_config` or `include_config_env`",
+                    )),
+                }?;
+
+                // Resolve the path relative to the current file.
+                let path = if path.is_absolute() {
+                    path
+                } else {
+                    // Rust analyzer hasn't implemented `Span::file()`.
+                    // https://github.com/rust-lang/rust-analyzer/issues/15950
+                    std::path::PathBuf::from(proc_macro2::Span::call_site().file())
+                        .parent()
+                        .ok_or(syn::Error::new_spanned(
+                            &path_lit,
+                            "cannot retrieve parent dir",
+                        ))?
+                        .join(path)
+                };
+
+                let format = match attrs.as_slice() {
+                    [] => Format::from_extension(
+                        path.extension()
+                            .ok_or(syn::Error::new_spanned(&path_lit, "unknown extension"))?
+                            .to_str()
+                            .ok_or(syn::Error::new_spanned(&path_lit, "unknown extension"))?,
+                    )
+                    .ok_or({
+                        syn::Error::new_spanned(&path_lit, "cannot select format from extension")
+                    }),
+                    [attribute] => {
+                        let specifier = attribute.meta.require_path_only()?.require_ident()?;
+                        Format::from_specifier(&specifier.to_string())
+                            .ok_or(syn::Error::new_spanned(specifier, "unknown specifier"))
+                    }
+                    [_, attribute, ..] => Err(syn::Error::new_spanned(
+                        attribute,
+                        "multiple format specifier attributes",
+                    )),
+                }?;
+                let text = std::fs::read_to_string(path)
+                    .map_err(|e| syn::Error::new_spanned(&path_lit, e))?;
+                format
+                    .parse(&text)
+                    .map_err(|e| syn::Error::new(expr_span, e))
+            }
+
+            syn::Expr::Binary(binary) => {
+                Ok(Self::value_from_expr(*binary.left)? + Self::value_from_expr(*binary.right)?)
+            }
+
+            _ => Err(syn::Error::new_spanned(
+                &expr,
+                "expected string literal or macro invocation",
+            )),
         }
-        resolved.push_str(&std::env::var(&variable)?);
     }
-    Ok(resolved)
+
+    // Resolve `$ENV_VAR` in a given path.
+    // Inspired from `include_dir::resolve_env`.
+    fn resolve_env(path: &str) -> Result<String, std::env::VarError> {
+        let mut chars = path.chars().peekable();
+        let mut resolved = String::new();
+        while let Some(c) = chars.next() {
+            if c != '$' {
+                resolved.push(c);
+                continue;
+            }
+            if chars.peek() == Some(&'$') {
+                chars.next();
+                resolved.push('$');
+                continue;
+            }
+            let mut variable = String::new();
+            while let Some(&c) = chars.peek() {
+                if matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '_') {
+                    chars.next();
+                    variable.push(c);
+                } else {
+                    break;
+                }
+            }
+            resolved.push_str(&std::env::var(&variable)?);
+        }
+        Ok(resolved)
+    }
 }
 
-struct ConfigReprModule {
-    item_mod: syn::ItemMod,
-    ty: syn::Type,
-    expr: syn::Expr,
+struct ConfigReprMod {
+    item_ty: syn::ItemType,
+    item_static: syn::ItemStatic,
+    item_struct: Option<syn::ItemStruct>,
+    field_mods: Vec<syn::ItemMod>,
+    access_impls: Vec<syn::ItemImpl>,
+    convert_impls: Vec<syn::ItemImpl>,
 }
 
-impl ConfigReprModule {
-    fn from_value(
-        ident: &syn::Ident,
-        mod_ident: &syn::Ident,
-        mod_path: &syn::Path,
-        value: &Value,
-    ) -> Self {
+impl ConfigReprMod {
+    fn from_value(value: &Value) -> Self {
         match value {
             Value::Nil => Self::from_primitive(
-                ident,
-                mod_ident,
-                syn::parse_quote! { () },
-                syn::parse_quote! { () },
+                syn::parse_quote! { ::inline_config::__private::ReprNil },
+                syn::parse_quote! { ::inline_config::__private::ReprNil },
             ),
             Value::Boolean(value) => Self::from_primitive(
-                ident,
-                mod_ident,
-                syn::parse_quote! { bool },
-                syn::parse_quote! { #value },
+                syn::parse_quote! { ::inline_config::__private::ReprBoolean },
+                syn::parse_quote! { ::inline_config::__private::ReprBoolean(#value) },
             ),
-            Value::Integer(value) => Self::from_primitive(
-                ident,
-                mod_ident,
-                syn::parse_quote! { i64 },
-                syn::parse_quote! { #value },
+            Value::PosInt(value) => Self::from_primitive(
+                syn::parse_quote! { ::inline_config::__private::ReprPosInt },
+                syn::parse_quote! { ::inline_config::__private::ReprPosInt(#value) },
+            ),
+            Value::NegInt(value) => Self::from_primitive(
+                syn::parse_quote! { ::inline_config::__private::ReprNegInt },
+                syn::parse_quote! { ::inline_config::__private::ReprNegInt(#value) },
             ),
             Value::Float(value) => Self::from_primitive(
-                ident,
-                mod_ident,
-                syn::parse_quote! { f64 },
-                syn::parse_quote! { #value },
+                syn::parse_quote! { ::inline_config::__private::ReprFloat },
+                syn::parse_quote! { ::inline_config::__private::ReprFloat(::inline_config::__private::OrderedFloat(#value)) },
             ),
             Value::String(value) => Self::from_primitive(
-                ident,
-                mod_ident,
-                syn::parse_quote! { &'static str },
-                syn::parse_quote! { #value },
+                syn::parse_quote! { ::inline_config::__private::ReprString },
+                syn::parse_quote! { ::inline_config::__private::ReprString(#value) },
             ),
-            Value::Array(value) => Self::from_array(ident, mod_ident, mod_path, value.iter()),
-            Value::Table(value) => Self::from_table(ident, mod_ident, mod_path, value.iter()),
+            Value::Array(value) => Self::from_container(
+                value.iter().enumerate(),
+                Key::index_ty,
+                Self::array_containers,
+            ),
+            Value::Table(value) => Self::from_container(
+                value.iter().map(|(name, value)| (name.as_ref(), value)),
+                Key::name_ty,
+                Self::table_containers,
+            ),
         }
     }
 
-    fn from_primitive(
-        ident: &syn::Ident,
-        mod_ident: &syn::Ident,
-        ty: syn::Type,
-        expr: syn::Expr,
-    ) -> Self {
-        let item_mod = syn::parse_quote! {
-            #[allow(non_snake_case)]
-            pub mod #mod_ident {
-                #[allow(non_camel_case_types)]
-                pub type #ident = #ty;
-            }
-        };
-        let ty = syn::parse_quote! {
-            #mod_ident::#ident
-        };
-        Self { item_mod, ty, expr }
+    fn from_primitive(ty: syn::Type, expr: syn::Expr) -> Self {
+        Self {
+            item_ty: syn::parse_quote! {
+                pub type Type = #ty;
+            },
+            item_static: syn::parse_quote! {
+                pub static EXPR: Type = #expr;
+            },
+            item_struct: None,
+            field_mods: Vec::new(),
+            access_impls: Vec::new(),
+            convert_impls: Vec::new(),
+        }
     }
 
-    fn from_array<'v>(
-        ident: &syn::Ident,
-        mod_ident: &syn::Ident,
-        mod_path: &syn::Path,
-        value: impl Iterator<Item = &'v Value>,
+    #[allow(clippy::type_complexity)]
+    fn from_container<'v, T: Copy>(
+        items: impl Iterator<Item = (T, &'v Value)>,
+        key_ty_fn: fn(T) -> syn::Type,
+        convert_items_fn: fn(&syn::Ident, Vec<T>, Vec<syn::Expr>) -> Vec<(syn::Type, syn::Expr)>,
     ) -> Self {
-        #[allow(clippy::type_complexity)]
-        let ((item_mods, (tys, exprs)), (key_tys, members)): (
-            (Vec<_>, (Vec<_>, Vec<_>)),
-            (Vec<_>, Vec<_>),
-        ) = value
+        let (field_mods, (idents, tags)): (Vec<_>, (Vec<_>, Vec<_>)) = items
             .enumerate()
-            .map(|(index, value)| {
-                let mod_ident = quote::format_ident!("_{index}");
-                let ident = quote::format_ident!("{ident}_{index}");
-                let field_module = Self::from_value(
-                    &ident,
-                    &mod_ident,
-                    &syn::parse_quote! { #mod_path::#mod_ident },
-                    value,
-                );
-                (
-                    (field_module.item_mod, (field_module.ty, field_module.expr)),
-                    (Key::index_ty(index), syn::Member::from(index)),
-                )
+            .map(|(index, (tag, value))| {
+                let ident = quote::format_ident!("_{index}");
+                (Self::from_value(value).item_mod(&ident), (ident, tag))
             })
             .unzip();
-        let lifetime = syn::Lifetime::new("'__inline_config__r", proc_macro2::Span::call_site());
-        let generic = syn::Ident::new("__inline_config__T", proc_macro2::Span::call_site());
-        let convert_into_impls: [syn::Item; _] = [syn::parse_quote! {
-            impl<#lifetime, #generic>
-                ::inline_config::__private::ConvertInto<#lifetime, Vec<#generic>> for #ident
-            where
-                #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>,)*
-            {
-                fn convert_into(&#lifetime self) -> Vec<#generic> {
-                    [
-                        #(
-                            <#tys as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::convert_into(&self.#members),
-                        )*
-                    ].into()
+        Self {
+            item_ty: syn::parse_quote! {
+                pub type Type = ::inline_config::__private::ReprContainer<Struct>;
+            },
+            item_static: syn::parse_quote! {
+                pub static EXPR: Type = ::inline_config::__private::ReprContainer(Struct {
+                    #(#idents: &#idents::EXPR,)*
+                });
+            },
+            item_struct: Some(syn::parse_quote! {
+                #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+                pub struct Struct {
+                    #(pub #idents: &'static #idents::Type,)*
                 }
-            }
-        }];
-        let item_mod = syn::parse_quote! {
-            #[allow(non_snake_case)]
-            pub mod #mod_ident {
-                #(#item_mods)*
+            }),
+            field_mods,
+            access_impls: idents
+                .iter()
+                .zip(tags.iter())
+                .map(|(ident, tag)| {
+                    let key_ty = key_ty_fn(*tag);
+                    syn::parse_quote! {
+                        impl ::inline_config::__private::Access<#key_ty> for Struct {
+                            type Repr = #ident::Type;
 
-                #[allow(non_camel_case_types)]
-                pub struct #ident(#(pub #tys),*);
-
-                #(
-                    impl ::inline_config::__private::AccessKey<#key_tys> for #ident {
-                        type Repr = #tys;
-
-                        fn access_key(&self) -> &Self::Repr {
-                            &self.#members
+                            fn access(&self) -> &Self::Repr {
+                                &self.#ident
+                            }
                         }
                     }
-                )*
-
-                #(#convert_into_impls)*
-
-                impl ::inline_config::__private::NonNilRepr for #ident {}
-            }
-        };
-        let ty = syn::parse_quote! {
-            #mod_ident::#ident
-        };
-        let expr = syn::parse_quote! {
-            #mod_path::#ident(#(#exprs),*)
-        };
-        Self { item_mod, ty, expr }
-    }
-
-    fn from_table<'v>(
-        ident: &syn::Ident,
-        mod_ident: &syn::Ident,
-        mod_path: &syn::Path,
-        value: impl Iterator<Item = (&'v String, &'v Value)>,
-    ) -> Self {
-        #[allow(clippy::type_complexity)]
-        let ((item_mods, (tys, exprs)), (names, (key_tys, members))): (
-            (Vec<_>, (Vec<_>, Vec<_>)),
-            (Vec<_>, (Vec<_>, Vec<_>)),
-        ) = value
-            .enumerate()
-            .map(|(index, (name, value))| {
-                let mod_ident = syn::parse_str::<syn::Ident>(name)
-                    .ok()
-                    .or_else(|| syn::parse_str::<syn::Ident>(&format!("r#{name}")).ok())
-                    .filter(|_| {
-                        !(name.starts_with('_') && name.chars().skip(1).all(|c| c.is_ascii_digit()))
+                })
+                .collect(),
+            convert_impls: {
+                let generic = syn::Ident::new("__inline_config__T", proc_macro2::Span::call_site());
+                let convert_items = convert_items_fn(&generic, tags, idents.iter().map(|ident| {
+                    syn::parse_quote! {
+                        <
+                            #ident::Type as ::inline_config::__private::ConvertRepr<#generic>
+                        >::convert_repr(&self.#ident)
+                    }
+                }).collect());
+                convert_items.iter()
+                    .map(|(ty, expr)| {
+                        syn::parse_quote! {
+                            impl<#generic> ::inline_config::__private::Convert<#ty> for Struct
+                            where
+                                #(#idents::Type: ::inline_config::__private::ConvertRepr<#generic>,)*
+                            {
+                                fn convert(&self) -> #ty {
+                                    #expr
+                                }
+                            }
+                        }
                     })
-                    .unwrap_or_else(|| quote::format_ident!("_{index}"));
-                let ident = quote::format_ident!("{ident}_{index}");
-                let field_module = Self::from_value(
-                    &ident,
-                    &mod_ident,
-                    &syn::parse_quote! { #mod_path::#mod_ident },
-                    value,
-                );
-                (
-                    (field_module.item_mod, (field_module.ty, field_module.expr)),
-                    (name, (Key::name_ty(name), syn::Member::from(mod_ident))),
-                )
-            })
-            .unzip();
-        let lifetime = syn::Lifetime::new("'__inline_config__r", proc_macro2::Span::call_site());
-        let generic = syn::Ident::new("__inline_config__T", proc_macro2::Span::call_site());
-        let convert_into_impls: [syn::Item; _] = [
-            syn::parse_quote! {
-                impl<#lifetime, #generic>
-                    ::inline_config::__private::ConvertInto<#lifetime, ::std::collections::BTreeMap<&#lifetime str, #generic>> for #ident
-                where
-                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>,)*
-                {
-                    fn convert_into(&#lifetime self) -> ::std::collections::BTreeMap<&#lifetime str, #generic> {
-                        [
-                            #(
-                                (
-                                    #names,
-                                    <#tys as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::convert_into(&self.#members),
-                                ),
-                            )*
-                        ].into()
-                    }
-                }
+                    .collect()
             },
-            syn::parse_quote! {
-                impl<#lifetime, #generic>
-                    ::inline_config::__private::ConvertInto<#lifetime, ::std::collections::BTreeMap<String, #generic>> for #ident
-                where
-                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>,)*
-                {
-                    fn convert_into(&#lifetime self) -> ::std::collections::BTreeMap<String, #generic> {
-                        [
-                            #(
-                                (
-                                    #names.to_string(),
-                                    <#tys as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::convert_into(&self.#members),
-                                ),
-                            )*
-                        ].into()
-                    }
-                }
-            },
-            #[cfg(feature = "indexmap")]
-            syn::parse_quote! {
-                impl<#lifetime, #generic>
-                    ::inline_config::__private::ConvertInto<#lifetime, ::indexmap::IndexMap<&#lifetime str, #generic>> for #ident
-                where
-                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>,)*
-                {
-                    fn convert_into(&#lifetime self) -> ::indexmap::IndexMap<&#lifetime str, #generic> {
-                        [
-                            #(
-                                (
-                                    #names,
-                                    <#tys as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::convert_into(&self.#members),
-                                ),
-                            )*
-                        ].into()
-                    }
-                }
-            },
-            #[cfg(feature = "indexmap")]
-            syn::parse_quote! {
-                impl<#lifetime, #generic>
-                    ::inline_config::__private::ConvertInto<#lifetime, ::indexmap::IndexMap<String, #generic>> for #ident
-                where
-                    #(#tys: ::inline_config::__private::ConvertInto<#lifetime, #generic>,)*
-                {
-                    fn convert_into(&#lifetime self) -> ::indexmap::IndexMap<String, #generic> {
-                        [
-                            #(
-                                (
-                                    #names.to_string(),
-                                    <#tys as ::inline_config::__private::ConvertInto<#lifetime, #generic>>::convert_into(&self.#members),
-                                ),
-                            )*
-                        ].into()
-                    }
-                }
-            },
-        ];
-        let item_mod = syn::parse_quote! {
-            #[allow(non_snake_case)]
+        }
+    }
+
+    fn item_mod(&self, mod_ident: &syn::Ident) -> syn::ItemMod {
+        let Self {
+            item_ty,
+            item_static,
+            item_struct,
+            field_mods,
+            access_impls,
+            convert_impls,
+        } = self;
+        syn::parse_quote! {
             pub mod #mod_ident {
-                #(#item_mods)*
-
-                #[allow(non_camel_case_types)]
-                pub struct #ident {
-                    #(pub #members: #tys,)*
-                }
-
-                #(
-                    impl ::inline_config::__private::AccessKey<#key_tys> for #ident {
-                        type Repr = #tys;
-
-                        fn access_key(&self) -> &Self::Repr {
-                            &self.#members
-                        }
-                    }
-                )*
-
-                #(#convert_into_impls)*
-
-                impl ::inline_config::__private::NonNilRepr for #ident {}
+                #item_ty
+                #item_static
+                #item_struct
+                #(#field_mods)*
+                #(#access_impls)*
+                #(#convert_impls)*
             }
-        };
-        let ty = syn::parse_quote! {
-            #mod_ident::#ident
-        };
-        let expr = syn::parse_quote! {
-            #mod_path::#ident {
-                #(#members: #exprs,)*
-            }
-        };
-        Self { item_mod, ty, expr }
+        }
+    }
+
+    fn array_containers(
+        generic: &syn::Ident,
+        _tags: Vec<usize>,
+        exprs: Vec<syn::Expr>,
+    ) -> Vec<(syn::Type, syn::Expr)> {
+        [(
+            syn::parse_quote! { Vec<#generic> },
+            syn::parse_quote! { [#(#exprs),*].into() },
+        )]
+        .into()
+    }
+
+    fn table_containers(
+        generic: &syn::Ident,
+        tags: Vec<&str>,
+        exprs: Vec<syn::Expr>,
+    ) -> Vec<(syn::Type, syn::Expr)> {
+        [
+            (
+                syn::parse_quote! { ::std::collections::BTreeMap<&'static str, #generic> },
+                syn::parse_quote! { [#((#tags, #exprs)),*].into() },
+            ),
+            (
+                syn::parse_quote! { ::std::collections::BTreeMap<String, #generic> },
+                syn::parse_quote! { [#((#tags.to_string(), #exprs)),*].into() },
+            ),
+            #[cfg(feature = "indexmap")]
+            (
+                syn::parse_quote! { ::inline_config::__private::IndexMap<&'static str, #generic> },
+                syn::parse_quote! { [#((#tags, #exprs)),*].into() },
+            ),
+            #[cfg(feature = "indexmap")]
+            (
+                syn::parse_quote! { ::inline_config::__private::IndexMap<String, #generic> },
+                syn::parse_quote! { [#((#tags.to_string(), #exprs)),*].into() },
+            ),
+        ]
+        .into()
     }
 }

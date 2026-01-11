@@ -1,7 +1,7 @@
 use inline_config::{Get, config, path};
 
 config! {
-    pub static MY_CONFIG = #[toml] r#"
+    pub static MY_CONFIG: _ = #[toml] r#"
         [fruits]
         apple = "red"
         orange = "orange"

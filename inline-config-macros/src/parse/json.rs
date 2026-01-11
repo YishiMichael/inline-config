@@ -11,10 +11,12 @@ fn morph(value: json::Value) -> Result<Value, Box<dyn Error>> {
     Ok(match value {
         json::Value::Null => Value::Nil,
         json::Value::Bool(value) => Value::Boolean(value),
-        json::Value::Number(value) => value.as_i64().map(Value::Integer).unwrap_or_else(|| {
-            Value::Float(
-                value.as_f64().unwrap(), // Never fails.
-            )
+        json::Value::Number(value) => value.as_u64().map(Value::PosInt).unwrap_or_else(|| {
+            value.as_i64().map(Value::NegInt).unwrap_or_else(|| {
+                Value::Float(
+                    value.as_f64().unwrap(), // Never fails.
+                )
+            })
         }),
         json::Value::String(value) => Value::String(value),
         json::Value::Array(value) => {

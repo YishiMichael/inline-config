@@ -32,10 +32,11 @@ In your source file, declare a static variable using [`config!()`](https://docs.
 use inline_config::config;
 
 config! {
-    // Note, this looks like a typical static item declaration, but the type is omitted.
+    // Just looks like a typical static item declaration.
+    // Apart from the static item, a type `MyConfig` will be generated as well.
     // `#[toml]` is needed to specify the format of this source.
     // Including a file from disk is also possible, see `examples/include.rs`
-    pub static MY_CONFIG = #[toml] r#"
+    pub static MY_CONFIG: MyConfig = #[toml] r#"
         title = "TOML example"
 
         [server]

@@ -11,10 +11,12 @@ fn morph(value: yaml::Value) -> Result<Value, Box<dyn Error>> {
     Ok(match value {
         yaml::Value::Null => Value::Nil,
         yaml::Value::Bool(value) => Value::Boolean(value),
-        yaml::Value::Number(value) => value.as_i64().map(Value::Integer).unwrap_or_else(|| {
-            Value::Float(
-                value.as_f64().unwrap(), // Never fails.
-            )
+        yaml::Value::Number(value) => value.as_u64().map(Value::PosInt).unwrap_or_else(|| {
+            value.as_i64().map(Value::NegInt).unwrap_or_else(|| {
+                Value::Float(
+                    value.as_f64().unwrap(), // Never fails.
+                )
+            })
         }),
         yaml::Value::String(value) => Value::String(value),
         yaml::Value::Sequence(value) => {

@@ -1,100 +1,114 @@
-pub trait ConvertInto<'r, T> {
-    fn convert_into(&'r self) -> T;
+use crate::repr::{
+    ReprBoolean, ReprContainer, ReprFloat, ReprNegInt, ReprNil, ReprPosInt, ReprString,
+};
+
+pub trait ConvertRepr<T> {
+    fn convert_repr(&'static self) -> T;
 }
 
-pub trait ConvertFrom<'r, R> {
-    fn convert_from(repr: &'r R) -> Self;
+pub trait Convert<T> {
+    fn convert(&'static self) -> T;
 }
 
-pub trait NonNilRepr {}
-pub trait NonNil {}
-
-impl<'r, R, T> ConvertInto<'r, T> for R
-where
-    T: ConvertFrom<'r, R>,
-{
-    fn convert_into(&'r self) -> T {
-        <T as ConvertFrom<'r, R>>::convert_from(self)
-    }
+pub trait ConvertFrom<R> {
+    fn convert_from(repr: &'static R) -> Self;
 }
 
-impl<T> ConvertFrom<'_, ()> for T
-where
-    T: Default + NonNil,
-{
-    fn convert_from(_repr: &()) -> T {
-        T::default()
-    }
-}
+pub trait NonOption {}
 
-impl<'r, T, R> ConvertFrom<'r, R> for Option<T>
-where
-    R: ConvertInto<'r, T> + NonNilRepr,
-{
-    fn convert_from(repr: &'r R) -> Option<T> {
-        Some(repr.convert_into())
-    }
-}
-
-impl<T> ConvertFrom<'_, ()> for Option<T> {
-    fn convert_from(_repr: &()) -> Option<T> {
+impl<T> ConvertRepr<Option<T>> for ReprNil {
+    fn convert_repr(&self) -> Option<T> {
         None
     }
 }
 
-impl ConvertFrom<'_, bool> for bool {
-    fn convert_from(repr: &bool) -> Self {
-        *repr
+impl<T> ConvertRepr<T> for ReprNil
+where
+    T: Default + NonOption, // Avoid collision from `Option`.
+{
+    fn convert_repr(&self) -> T {
+        T::default()
     }
 }
 
-impl NonNilRepr for bool {}
-impl NonNil for bool {}
-
-impl<'r> ConvertFrom<'_, &'r str> for &'r str {
-    fn convert_from(repr: &&'r str) -> Self {
-        repr
+impl<R, T> ConvertRepr<Option<T>> for R
+where
+    R: ConvertRepr<T> + std::ops::Deref, // Avoid collision from `ReprNil`.
+{
+    fn convert_repr(&'static self) -> Option<T> {
+        Some(self.convert_repr())
     }
 }
 
-impl ConvertFrom<'_, &str> for String {
-    fn convert_from(repr: &&str) -> Self {
-        repr.to_string()
+impl NonOption for bool {}
+impl ConvertRepr<bool> for ReprBoolean {
+    fn convert_repr(&self) -> bool {
+        **self
     }
 }
 
-impl NonNilRepr for &str {}
-impl NonNil for &str {}
-impl NonNil for String {}
-
+impl NonOption for i8 {}
+impl NonOption for i16 {}
+impl NonOption for i32 {}
+impl NonOption for i64 {}
+impl NonOption for i128 {}
+impl NonOption for isize {}
+impl NonOption for u8 {}
+impl NonOption for u16 {}
+impl NonOption for u32 {}
+impl NonOption for u64 {}
+impl NonOption for u128 {}
+impl NonOption for usize {}
+impl NonOption for f32 {}
+impl NonOption for f64 {}
 macro_rules! numeric_convert {
-    ($($target:ty)*) => {
+    ($source:ty => $($target:ty)*) => {
         $(
-            impl NonNil for $target {}
-
-            impl ConvertFrom<'_, i64> for $target {
-                fn convert_from(repr: &i64) -> Self {
-                    *repr as $target
-                }
-            }
-            impl ConvertFrom<'_, f64> for $target {
-                fn convert_from(repr: &f64) -> Self {
-                    *repr as $target
+            impl ConvertRepr<$target> for $source {
+                fn convert_repr(&self) -> $target {
+                    **self as $target
                 }
             }
         )*
     };
 }
-numeric_convert!(i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize f32 f64);
+numeric_convert!(ReprPosInt => i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize f32 f64);
+numeric_convert!(ReprNegInt => i8 i16 i32 i64 i128 isize f32 f64);
+numeric_convert!(ReprFloat => f32 f64);
 
-impl NonNilRepr for i64 {}
-impl NonNilRepr for f64 {}
+impl ConvertRepr<&'static str> for ReprString {
+    fn convert_repr(&'static self) -> &'static str {
+        self
+    }
+}
+impl ConvertRepr<String> for ReprString {
+    fn convert_repr(&self) -> String {
+        self.to_string()
+    }
+}
 
-impl<T> NonNil for Vec<T> {}
-impl<T> NonNil for std::collections::BTreeMap<&str, T> {}
-impl<T> NonNil for std::collections::BTreeMap<String, T> {}
+impl<S, T> ConvertRepr<T> for ReprContainer<S>
+where
+    S: Convert<T>,
+    T: NonOption,
+{
+    fn convert_repr(&'static self) -> T {
+        self.0.convert()
+    }
+}
+
+impl<R, T> Convert<T> for R
+where
+    T: ConvertFrom<R>,
+{
+    fn convert(&'static self) -> T {
+        T::convert_from(self)
+    }
+}
+
+impl<T> NonOption for Vec<T> {}
+
+impl<K, T> NonOption for std::collections::BTreeMap<K, T> {}
 
 #[cfg(feature = "indexmap")]
-impl<T> NonNil for indexmap::IndexMap<&str, T> {}
-#[cfg(feature = "indexmap")]
-impl<T> NonNil for indexmap::IndexMap<String, T> {}
+impl<K, T> NonOption for indexmap::IndexMap<K, T> {}
