@@ -1,5 +1,4 @@
 use crate::value::Value;
-use std::error::Error;
 
 #[cfg(feature = "json")]
 pub mod json;
@@ -22,7 +21,7 @@ pub enum Format {
 }
 
 impl Format {
-    pub fn parse(self, s: &str) -> Result<Value, Box<dyn Error>> {
+    pub fn parse(self, s: &str) -> Result<Value, Box<dyn std::error::Error>> {
         match self {
             #[cfg(feature = "json")]
             Self::Json => json::parse(s),

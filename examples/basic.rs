@@ -2,6 +2,7 @@ use inline_config::{ConfigData, Get, Path, config, path};
 
 config! {
     /// Edited from TOML official example.
+    /// This defines a type `TomlExample` and a static variable `TOML_EXAMPLE`.
     pub static TOML_EXAMPLE: TomlExample = #[toml] r#"
         title = "TOML Example"
 
@@ -37,6 +38,12 @@ config! {
         yaml = 2001
         toml = 2013
     "#;
+
+    /// Every `config!()` block may contain multiple config items.
+    /// Types can be ellided if we do not care its type.
+    pub static ANOTHER_CONFIG: _ = #[json] r#"{
+        "title": "JSON Example"
+    }"#;
 }
 
 fn primitive_types() {
@@ -229,6 +236,35 @@ fn get_trait() {
     println!("{names:?}");
 }
 
+fn shared_type() {
+    // Multiple configs may share the same type name.
+    config! {
+        static CONFIG_A: Config = #[json] r#"
+        {
+            "name": "Tom Preston-Werner",
+            "preferred-name": "Tom",
+            "year-of-birth": 1979
+        }
+        "#;
+
+        static CONFIG_B: Config = #[json] r#"
+        {
+            "name": "Lamport",
+            "preferred-name": null
+        }
+        "#;
+    }
+
+    // In this case, the `Get` trait implements the intersection of all variants.
+    let preferred_name: Option<&str> = CONFIG_A.get(path!("preferred-name"));
+    println!("{preferred_name:?}");
+    let preferred_name: Option<&str> = CONFIG_B.get(path!("preferred-name"));
+    println!("{preferred_name:?}");
+
+    // This does not fall in the intersection, hence will cause compile error.
+    // let year_of_birth: u32 = CONFIG_A.get(path!("year-of-birth"));
+}
+
 fn main() {
     primitive_types();
     container_types();
@@ -236,4 +272,5 @@ fn main() {
     optional_types();
     overwrite();
     get_trait();
+    shared_type();
 }

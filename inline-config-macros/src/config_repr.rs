@@ -11,7 +11,7 @@ struct ConfigItem {
     vis: syn::Visibility,
     mutability: syn::StaticMutability,
     ident: syn::Ident,
-    ty: Option<syn::Ident>,
+    ty: syn::Ident,
     value: Value,
 }
 
@@ -27,87 +27,128 @@ impl syn::parse::Parse for ConfigItems {
 
 impl quote::ToTokens for ConfigItems {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let mut groups = indexmap::IndexMap::new();
-        self.items.iter().for_each(
-            |ConfigItem {
-                 attrs,
-                 vis,
-                 mutability,
-                 ident,
-                 ty,
-                 value,
-             }| {
-                let ty = ty.clone().unwrap_or(quote::format_ident!("__{ident}"));
-                let mod_ident = quote::format_ident!("__{}", ident.to_string().to_lowercase());
-                let item_static: syn::ItemStatic = syn::parse_quote! {
-                    #(#attrs)*
-                    #vis #mutability static #ident: #ty = #ty::#mod_ident(#mod_ident::EXPR);
-                };
-                item_static.to_tokens(tokens);
-                ConfigReprMod::from_value(value)
-                    .item_mod(&mod_ident)
-                    .to_tokens(tokens);
-                groups.entry(ty).or_insert_with(Vec::new).push(mod_ident);
-            },
-        );
-        groups.iter().for_each(|(ty, idents)| {
-            let item_enum: syn::ItemEnum = syn::parse_quote! {
-                #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
-                #[allow(non_camel_case_types)]
-                pub enum #ty {
-                    #(#idents(#idents::Type),)*
-                }
-            };
-            let get_impl: syn::ItemImpl = syn::parse_quote! {
-                impl<P, T> ::inline_config::Get<P, T> for #ty
-                where
-                    #(
-                        #idents::Type: ::inline_config::__private::AccessPath<P>,
-                        <#idents::Type as ::inline_config::__private::AccessPath<P>>::Repr: ::inline_config::__private::ConvertRepr<T>,
-                    )*
-                {
-                    fn get(&'static self, _path: P) -> T {
-                        match self {#(
-                            Self::#idents(value) => <
-                                <#idents::Type as ::inline_config::__private::AccessPath<P>>::Repr as ::inline_config::__private::ConvertRepr<T>
-                            >::convert_repr(
-                                <#idents::Type as ::inline_config::__private::AccessPath<P>>::access_path(
-                                    value,
-                                ),
-                            ),
-                        )*}
+        self.items
+            .iter()
+            .fold(indexmap::IndexMap::new(), |mut groups, config_item| {
+                groups
+                    .entry(config_item.ty.clone())
+                    .or_insert_with(Vec::new)
+                    .push(config_item);
+                groups
+            })
+            .iter()
+            .for_each(|(ty, config_items)| {
+                let ((variants, variant_tys), (item_statics, item_mods)): (
+                (Vec<_>, Vec<_>),
+                (Vec<_>, Vec<_>),
+            ) = config_items
+                .iter()
+                .map(
+                    |ConfigItem {
+                         attrs,
+                         vis,
+                         mutability,
+                         ident,
+                         ty: _,
+                         value,
+                     }| {
+                        let mod_ident = quote::format_ident!(
+                            "__{}",
+                            convert_case::ccase!(upper_snake -> snake, ident.to_string())
+                        );
+                        let variant = quote::format_ident!(
+                            "{}",
+                            convert_case::ccase!(upper_snake -> upper_camel, ident.to_string())
+                        );
+                        let variant_ty: syn::Type = syn::parse_quote! {
+                            #mod_ident::Type
+                        };
+                        let item_static: syn::ItemStatic = syn::parse_quote! {
+                            #(#attrs)*
+                            #vis #mutability static #ident: #ty = #ty::#variant(#mod_ident::EXPR);
+                        };
+                        let item_mod = ConfigReprMod::from_value(value).item_mod(&mod_ident);
+                        ((variant, variant_ty), (item_static, item_mod))
+                    },
+                )
+                .unzip();
+                let item_enum: syn::ItemEnum = syn::parse_quote! {
+                    #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+                    pub enum #ty {
+                        #(#variants(#variant_tys),)*
                     }
-                }
-            };
-            item_enum.to_tokens(tokens);
-            get_impl.to_tokens(tokens);
-        });
+                };
+                let get_impl: syn::ItemImpl = syn::parse_quote! {
+                    impl<P, T> ::inline_config::Get<P, T> for #ty
+                    where
+                        #(
+                            #variant_tys:
+                                ::inline_config::__private::AccessPath<P>,
+                            <
+                                #variant_tys
+                                    as ::inline_config::__private::AccessPath<P>
+                            >::Repr:
+                                ::inline_config::__private::ConvertRepr<T>,
+                        )*
+                    {
+                        fn get(&'static self, _path: P) -> T {
+                            match self {
+                                #(
+                                    Self::#variants(value) => <
+                                        <
+                                            #variant_tys
+                                                as ::inline_config::__private::AccessPath<P>
+                                        >::Repr
+                                            as ::inline_config::__private::ConvertRepr<T>
+                                    >::convert_repr(
+                                        <
+                                            #variant_tys
+                                                as ::inline_config::__private::AccessPath<P>
+                                        >::access_path(
+                                            value,
+                                        ),
+                                    ),
+                                )*
+                            }
+                        }
+                    }
+                };
+                item_enum.to_tokens(tokens);
+                get_impl.to_tokens(tokens);
+                item_statics
+                    .iter()
+                    .for_each(|item_static| item_static.to_tokens(tokens));
+                item_mods
+                    .iter()
+                    .for_each(|item_mod| item_mod.to_tokens(tokens));
+            });
     }
 }
 
 impl ConfigItem {
     fn from_item_static(item_static: syn::ItemStatic) -> syn::Result<Self> {
+        let ty = match &*item_static.ty {
+            syn::Type::Path(syn::TypePath { qself: None, path }) => path.require_ident()?.clone(),
+            syn::Type::Infer(_) => quote::format_ident!(
+                "__{}",
+                convert_case::ccase!(upper_snake -> upper_camel, item_static.ident.to_string())
+            ),
+            _ => Err(syn::Error::new_spanned(
+                item_static.ty,
+                "config type must be an identifier",
+            ))?,
+        };
         Ok(Self {
             attrs: item_static.attrs,
             vis: item_static.vis,
             mutability: item_static.mutability,
             ident: item_static.ident,
-            ty: match &*item_static.ty {
-                syn::Type::Path(syn::TypePath { qself: None, path }) => {
-                    Ok(Some(path.require_ident()?.clone()))
-                }
-                syn::Type::Infer(_) => Ok(None),
-                _ => Err(syn::Error::new_spanned(
-                    item_static.ty,
-                    "config type must be an identifier",
-                )),
-            }?,
-            value: Self::value_from_expr(*item_static.expr)?,
+            ty,
+            value: Self::value_from_expr(&item_static.expr)?,
         })
     }
 
-    fn value_from_expr(expr: syn::Expr) -> syn::Result<Value> {
-        let expr_span = syn::spanned::Spanned::span(&expr);
+    fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
         match expr {
             syn::Expr::Lit(syn::ExprLit {
                 attrs,
@@ -115,13 +156,14 @@ impl ConfigItem {
             }) => {
                 let format = match attrs.as_slice() {
                     [] => Err(syn::Error::new_spanned(
-                        &text_lit,
+                        text_lit,
                         "must specify format for literal config",
                     )),
                     [attribute] => {
                         let specifier = attribute.meta.require_path_only()?.require_ident()?;
-                        Format::from_specifier(&specifier.to_string())
-                            .ok_or(syn::Error::new_spanned(specifier, "unknown specifier"))
+                        Format::from_specifier(&specifier.to_string()).ok_or(
+                            syn::Error::new_spanned(specifier, "unknown format specifier"),
+                        )
                     }
                     [_, attribute, ..] => Err(syn::Error::new_spanned(
                         attribute,
@@ -130,11 +172,11 @@ impl ConfigItem {
                 }?;
                 format
                     .parse(&text_lit.value())
-                    .map_err(|e| syn::Error::new(expr_span, e))
+                    .map_err(|e| syn::Error::new_spanned(expr, e))
             }
 
             syn::Expr::Macro(syn::ExprMacro { attrs, mac }) => {
-                let path_lit: syn::LitStr = syn::parse2(mac.tokens)?;
+                let path_lit: syn::LitStr = syn::parse2(mac.tokens.clone())?;
                 let path = match mac.path.require_ident()?.to_string().as_str() {
                     "include_config" => Ok(std::path::PathBuf::from(path_lit.value())),
                     "include_config_env" => Self::resolve_env(&path_lit.value())
@@ -173,8 +215,9 @@ impl ConfigItem {
                     }),
                     [attribute] => {
                         let specifier = attribute.meta.require_path_only()?.require_ident()?;
-                        Format::from_specifier(&specifier.to_string())
-                            .ok_or(syn::Error::new_spanned(specifier, "unknown specifier"))
+                        Format::from_specifier(&specifier.to_string()).ok_or(
+                            syn::Error::new_spanned(specifier, "unknown format specifier"),
+                        )
                     }
                     [_, attribute, ..] => Err(syn::Error::new_spanned(
                         attribute,
@@ -185,15 +228,15 @@ impl ConfigItem {
                     .map_err(|e| syn::Error::new_spanned(&path_lit, e))?;
                 format
                     .parse(&text)
-                    .map_err(|e| syn::Error::new(expr_span, e))
+                    .map_err(|e| syn::Error::new_spanned(expr, e))
             }
 
             syn::Expr::Binary(binary) => {
-                Ok(Self::value_from_expr(*binary.left)? + Self::value_from_expr(*binary.right)?)
+                Ok(Self::value_from_expr(&binary.left)? + Self::value_from_expr(&binary.right)?)
             }
 
             _ => Err(syn::Error::new_spanned(
-                &expr,
+                expr,
                 "expected string literal or macro invocation",
             )),
         }
@@ -230,8 +273,8 @@ impl ConfigItem {
 }
 
 struct ConfigReprMod {
-    item_ty: syn::ItemType,
-    item_static: syn::ItemStatic,
+    ty: syn::Type,
+    expr: syn::Expr,
     item_struct: Option<syn::ItemStruct>,
     field_mods: Vec<syn::ItemMod>,
     access_impls: Vec<syn::ItemImpl>,
@@ -280,12 +323,8 @@ impl ConfigReprMod {
 
     fn from_primitive(ty: syn::Type, expr: syn::Expr) -> Self {
         Self {
-            item_ty: syn::parse_quote! {
-                pub type Type = #ty;
-            },
-            item_static: syn::parse_quote! {
-                pub static EXPR: Type = #expr;
-            },
+            ty,
+            expr,
             item_struct: None,
             field_mods: Vec::new(),
             access_impls: Vec::new(),
@@ -307,13 +346,13 @@ impl ConfigReprMod {
             })
             .unzip();
         Self {
-            item_ty: syn::parse_quote! {
-                pub type Type = ::inline_config::__private::ReprContainer<Struct>;
+            ty: syn::parse_quote! {
+                ::inline_config::__private::ReprContainer<Struct>
             },
-            item_static: syn::parse_quote! {
-                pub static EXPR: Type = ::inline_config::__private::ReprContainer(Struct {
+            expr: syn::parse_quote! {
+                ::inline_config::__private::ReprContainer(Struct {
                     #(#idents: &#idents::EXPR,)*
-                });
+                })
             },
             item_struct: Some(syn::parse_quote! {
                 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -367,8 +406,8 @@ impl ConfigReprMod {
 
     fn item_mod(&self, mod_ident: &syn::Ident) -> syn::ItemMod {
         let Self {
-            item_ty,
-            item_static,
+            ty,
+            expr,
             item_struct,
             field_mods,
             access_impls,
@@ -376,8 +415,8 @@ impl ConfigReprMod {
         } = self;
         syn::parse_quote! {
             pub mod #mod_ident {
-                #item_ty
-                #item_static
+                pub type Type = #ty;
+                pub static EXPR: Type = #expr;
                 #item_struct
                 #(#field_mods)*
                 #(#access_impls)*

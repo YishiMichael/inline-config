@@ -124,8 +124,8 @@ mod repr;
 /// After expansion the following symbols are brought into scope:
 ///
 /// * Static items, one for each `<IDENT>`;
-/// * Type items, one for each unique `<TYPE>`, one for each `__<IDENT>` whose type is ellided;
-/// * Mod items, one for each `__<IDENT:lower>`.
+/// * Type items, one for each unique `<TYPE>`, one for each `__<IDENT:upper_camel>` whose type is ellided;
+/// * Mod items, one for each `__<IDENT:snake>`.
 ///
 /// Those prefixed with double underscores are only meant for internal usage only.
 ///
