@@ -1,4 +1,4 @@
-use inline_config::{ConfigData, Get, Path, config, path};
+use inline_config::{config, path, ConfigData, Get, Path};
 
 config! {
     /// Edited from TOML official example.
@@ -236,6 +236,19 @@ fn get_trait() {
     println!("{names:?}");
 }
 
+fn implemented_traits() {
+    // The generated types will always have the following basic traits implemented.
+    fn f<
+        C: Clone + Copy + Eq + Ord + PartialEq + PartialOrd + std::fmt::Debug + std::hash::Hash,
+    >(
+        _config: C,
+    ) {
+    }
+
+    f(TOML_EXAMPLE);
+    println!("{:?}", TOML_EXAMPLE);
+}
+
 fn shared_type() {
     // Multiple configs may share the same type name.
     config! {
@@ -266,11 +279,20 @@ fn shared_type() {
 }
 
 fn main() {
+    println!("\n* primitive_types\n");
     primitive_types();
+    println!("\n* container_types\n");
     container_types();
+    println!("\n* user_types\n");
     user_types();
+    println!("\n* optional_types\n");
     optional_types();
+    println!("\n* overwrite\n");
     overwrite();
+    println!("\n* get_trait\n");
     get_trait();
+    println!("\n* implemented_traits\n");
+    implemented_traits();
+    println!("\n* shared_type\n");
     shared_type();
 }

@@ -1,4 +1,4 @@
-use inline_config::{Get, config, path};
+use inline_config::{config, path, Get};
 
 config! {
     // Include from a config file adjacent to this file, similar to `include_str!()`.

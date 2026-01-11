@@ -128,6 +128,7 @@ mod repr;
 /// * Mod items, one for each `__<IDENT:snake>`.
 ///
 /// Those prefixed with double underscores are only meant for internal usage only.
+/// All generated types will derive `Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd`.
 ///
 /// The expression part looks like a sum of sources.
 /// This is where overwriting takes place. All variants are completely overwritten except for tables, which got merged recursively.

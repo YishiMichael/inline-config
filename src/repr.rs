@@ -1,12 +1,6 @@
 #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ReprNil;
 
-impl std::fmt::Display for ReprNil {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "NIL")
-    }
-}
-
 impl std::fmt::Debug for ReprNil {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         write!(f, "NIL")
@@ -26,12 +20,6 @@ macro_rules! transparent_repr {
 
             fn deref(&self) -> &Self::Target {
                 &self.0
-            }
-        }
-
-        impl$(<$generic>)? std::fmt::Display for $ident$(<$generic>)? $(where $generic: std::fmt::Display)? {
-            fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                self.0.fmt(f)
             }
         }
 

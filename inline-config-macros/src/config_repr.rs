@@ -73,7 +73,7 @@ impl quote::ToTokens for ConfigItems {
                 )
                 .unzip();
                 let item_enum: syn::ItemEnum = syn::parse_quote! {
-                    #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
+                    #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
                     pub enum #ty {
                         #(#variants(#variant_tys),)*
                     }
@@ -309,12 +309,29 @@ impl ConfigReprMod {
                 syn::parse_quote! { ::inline_config::__private::ReprString(#value) },
             ),
             Value::Array(value) => Self::from_container(
-                value.iter().enumerate(),
+                value
+                    .iter()
+                    .enumerate()
+                    .map(|(index, value)| (index, syn::Member::from(index), value)),
                 Key::index_ty,
                 Self::array_containers,
             ),
             Value::Table(value) => Self::from_container(
-                value.iter().map(|(name, value)| (name.as_ref(), value)),
+                value.iter().enumerate().map(|(index, (name, value))| {
+                    (
+                        name.as_ref(),
+                        syn::Member::from(
+                            Some(name)
+                                .filter(|name| {
+                                    !(name.starts_with('_')
+                                        && name.chars().skip(1).all(|c| c.is_ascii_digit()))
+                                })
+                                .and_then(|name| syn::parse_str::<syn::Ident>(name).ok())
+                                .unwrap_or_else(|| quote::format_ident!("_{index}")),
+                        ),
+                        value,
+                    )
+                }),
                 Key::name_ty,
                 Self::table_containers,
             ),
@@ -334,15 +351,27 @@ impl ConfigReprMod {
 
     #[allow(clippy::type_complexity)]
     fn from_container<'v, T: Copy>(
-        items: impl Iterator<Item = (T, &'v Value)>,
+        items: impl Iterator<Item = (T, syn::Member, &'v Value)>,
         key_ty_fn: fn(T) -> syn::Type,
-        convert_items_fn: fn(&syn::Ident, Vec<T>, Vec<syn::Expr>) -> Vec<(syn::Type, syn::Expr)>,
+        convert_items_fn: fn(&syn::Ident, &[T], &[syn::Expr]) -> Vec<(syn::Type, syn::Expr)>,
     ) -> Self {
-        let (field_mods, (idents, tags)): (Vec<_>, (Vec<_>, Vec<_>)) = items
+        let (field_mods, (tags, (members, (member_tys, member_exprs)))): (
+            Vec<_>,
+            (Vec<_>, (Vec<_>, (Vec<_>, Vec<_>))),
+        ) = items
             .enumerate()
-            .map(|(index, (tag, value))| {
-                let ident = quote::format_ident!("_{index}");
-                (Self::from_value(value).item_mod(&ident), (ident, tag))
+            .map(|(index, (tag, member, value))| {
+                let mod_ident = quote::format_ident!("_{index}");
+                let member_ty: syn::Type = syn::parse_quote! {
+                    #mod_ident::Type
+                };
+                let member_expr: syn::Expr = syn::parse_quote! {
+                    #mod_ident::EXPR
+                };
+                (
+                    Self::from_value(value).item_mod(&mod_ident),
+                    (tag, (member, (member_ty, member_expr))),
+                )
             })
             .unzip();
         Self {
@@ -351,27 +380,41 @@ impl ConfigReprMod {
             },
             expr: syn::parse_quote! {
                 ::inline_config::__private::ReprContainer(Struct {
-                    #(#idents: &#idents::EXPR,)*
+                    #(#members: &#member_exprs,)*
                 })
             },
-            item_struct: Some(syn::parse_quote! {
-                #[derive(Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd)]
-                pub struct Struct {
-                    #(pub #idents: &'static #idents::Type,)*
-                }
-            }),
+            item_struct: Some(
+                if members
+                    .iter()
+                    .all(|member| matches!(member, syn::Member::Unnamed(_)))
+                {
+                    syn::parse_quote! {
+                        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+                        pub struct Struct(
+                            #(pub &'static #member_tys,)*
+                        );
+                    }
+                } else {
+                    syn::parse_quote! {
+                        #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+                        pub struct Struct {
+                            #(pub #members: &'static #member_tys,)*
+                        }
+                    }
+                },
+            ),
             field_mods,
-            access_impls: idents
+            access_impls: tags
                 .iter()
-                .zip(tags.iter())
-                .map(|(ident, tag)| {
+                .zip(members.iter().zip(member_tys.iter()))
+                .map(|(tag, (member, member_ty))| {
                     let key_ty = key_ty_fn(*tag);
                     syn::parse_quote! {
                         impl ::inline_config::__private::Access<#key_ty> for Struct {
-                            type Repr = #ident::Type;
+                            type Repr = #member_ty;
 
                             fn access(&self) -> &Self::Repr {
-                                &self.#ident
+                                &self.#member
                             }
                         }
                     }
@@ -379,19 +422,29 @@ impl ConfigReprMod {
                 .collect(),
             convert_impls: {
                 let generic = syn::Ident::new("__inline_config__T", proc_macro2::Span::call_site());
-                let convert_items = convert_items_fn(&generic, tags, idents.iter().map(|ident| {
-                    syn::parse_quote! {
-                        <
-                            #ident::Type as ::inline_config::__private::ConvertRepr<#generic>
-                        >::convert_repr(&self.#ident)
-                    }
-                }).collect());
-                convert_items.iter()
+                let (exprs, predicates): (Vec<syn::Expr>, Vec<syn::WherePredicate>) = members
+                    .iter()
+                    .zip(member_tys.iter())
+                    .map(|(member, member_ty)| {
+                        (
+                            syn::parse_quote! {
+                                <
+                                    #member_ty as ::inline_config::__private::ConvertRepr<#generic>
+                                >::convert_repr(&self.#member)
+                            },
+                            syn::parse_quote! {
+                                #member_ty: ::inline_config::__private::ConvertRepr<#generic>
+                            },
+                        )
+                    })
+                    .unzip();
+                convert_items_fn(&generic, &tags, &exprs)
+                    .iter()
                     .map(|(ty, expr)| {
                         syn::parse_quote! {
                             impl<#generic> ::inline_config::__private::Convert<#ty> for Struct
                             where
-                                #(#idents::Type: ::inline_config::__private::ConvertRepr<#generic>,)*
+                                #(#predicates,)*
                             {
                                 fn convert(&self) -> #ty {
                                     #expr
@@ -427,8 +480,8 @@ impl ConfigReprMod {
 
     fn array_containers(
         generic: &syn::Ident,
-        _tags: Vec<usize>,
-        exprs: Vec<syn::Expr>,
+        _tags: &[usize],
+        exprs: &[syn::Expr],
     ) -> Vec<(syn::Type, syn::Expr)> {
         [(
             syn::parse_quote! { Vec<#generic> },
@@ -439,8 +492,8 @@ impl ConfigReprMod {
 
     fn table_containers(
         generic: &syn::Ident,
-        tags: Vec<&str>,
-        exprs: Vec<syn::Expr>,
+        tags: &[&str],
+        exprs: &[syn::Expr],
     ) -> Vec<(syn::Type, syn::Expr)> {
         [
             (
