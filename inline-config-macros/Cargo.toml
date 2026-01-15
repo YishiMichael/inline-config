@@ -16,19 +16,13 @@ proc-macro = true
 
 [features]
 default = ["json", "toml", "yaml"]
-indexmap = ["serde_json?/preserve_order", "toml?/preserve_order"]
+indexmap = ["dep:indexmap", "serde_json?/preserve_order", "toml?/preserve_order"]
 json = ["dep:serde_json"]
 toml = ["dep:toml"]
 yaml = ["dep:serde_yaml"]
 
-[dependencies.convert_case]
-version = "0.10.0"
-
 [dependencies.darling]
 version = "0.23.0"
-
-[dependencies.indexmap]
-version = "2.12.1"
 
 [dependencies.proc-macro-error]
 version = "1.0.4"
@@ -42,6 +36,10 @@ version = "1.0.42"
 
 [dependencies.syn]
 version = "2.0.111"
+
+[dependencies.indexmap]
+version = "2.12.1"
+optional = true
 
 [dependencies.serde_json]
 version = "1.0.148"

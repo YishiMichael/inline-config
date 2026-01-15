@@ -7,7 +7,7 @@ Effortlessly embed config as static data and access with any compatible data str
 [![Docs](https://img.shields.io/docsrs/inline-config?style=for-the-badge&logo=docs.rs)](https://docs.rs/inline-config)
 [![CI](https://img.shields.io/github/actions/workflow/status/YishiMichael/inline-config/rust.yml?style=for-the-badge&logo=github&label=CI)](https://github.com/YishiMichael/inline-config)
 
-A procedual macro [`config!()`](https://docs.rs/inline-config/latest/inline_config/macro.config.html) is provided to parse sources at compile time, generate static data structures, from which we can access values via the [`Get`](https://docs.rs/inline-config/latest/inline_config/trait.Get.html) trait. The output types of accessed values can be almost "at will", as long as they are compatible.
+Procedual macros [`*_config!()`] are provided to parse sources at compile time, generate static data structures, from which we can access values via the [`Get`](https://docs.rs/inline-config/latest/inline_config/trait.Get.html) trait. The output types of accessed values can be almost "at will", as long as they are compatible.
 
 ## Features
 
@@ -26,24 +26,23 @@ Add `inline-config` to your dependencies
 cargo add inline-config
 ```
 
-In your source file, declare a static variable using [`config!()`](https://docs.rs/inline-config/latest/inline_config/macro.config.html) holding the config data
+In your source file, declare a static variable using [`*_config!()`] holding the config data
 
 ```rust
-use inline_config::config;
+use inline_config::toml_config;
 
-config! {
+toml_config! {
     // Just looks like a typical static item declaration.
     // Apart from the static item, a type `MyConfig` will be generated as well.
-    // `#[toml]` is needed to specify the format of this source.
     // Including a file from disk is also possible, see `examples/include.rs`
-    pub static MY_CONFIG: MyConfig = #[toml] r#"
+    pub static MY_CONFIG: MyConfig = r#"
         title = "TOML example"
 
         [server]
         owner = "Tom"
         timeout = 2000
         ports = [ 8000, 8001, 8002 ]
-    "# + #[toml] r#"
+    "# + r#"
         [server]
         timeout = 5000
     "#;

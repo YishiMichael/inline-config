@@ -1,6 +1,6 @@
 mod config_data;
 mod config_repr;
-mod parse;
+mod format;
 mod path;
 mod value;
 
@@ -15,10 +15,34 @@ where
     }
 }
 
+#[cfg(feature = "json")]
 #[proc_macro_error::proc_macro_error]
 #[proc_macro]
-pub fn config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(std::convert::identity::<config_repr::ConfigItems>, input)
+pub fn json_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    delegate_macro(
+        std::convert::identity::<config_repr::ConfigBlock<format::json::JsonFormat>>,
+        input,
+    )
+}
+
+#[cfg(feature = "yaml")]
+#[proc_macro_error::proc_macro_error]
+#[proc_macro]
+pub fn yaml_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    delegate_macro(
+        std::convert::identity::<config_repr::ConfigBlock<format::yaml::YamlFormat>>,
+        input,
+    )
+}
+
+#[cfg(feature = "toml")]
+#[proc_macro_error::proc_macro_error]
+#[proc_macro]
+pub fn toml_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    delegate_macro(
+        std::convert::identity::<config_repr::ConfigBlock<format::toml::TomlFormat>>,
+        input,
+    )
 }
 
 #[proc_macro_error::proc_macro_error]

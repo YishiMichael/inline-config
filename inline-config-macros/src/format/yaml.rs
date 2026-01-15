@@ -2,9 +2,13 @@ use crate::value::Value;
 use serde_yaml as yaml;
 use std::error::Error;
 
-pub fn parse(s: &str) -> Result<Value, Box<dyn Error>> {
-    let value = yaml::from_str(s)?;
-    morph(value)
+pub struct YamlFormat;
+
+impl super::Format for YamlFormat {
+    fn parse(s: &str) -> Result<Value, Box<dyn Error>> {
+        let value = yaml::from_str(s)?;
+        morph(value)
+    }
 }
 
 fn morph(value: yaml::Value) -> Result<Value, Box<dyn Error>> {

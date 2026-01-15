@@ -1,9 +1,9 @@
-use inline_config::{config, path, ConfigData, Get, Path};
+use inline_config::{ConfigData, Get, Path, json_config, path, toml_config};
 
-config! {
+toml_config! {
     /// Edited from TOML official example.
     /// This defines a type `TomlExample` and a static variable `TOML_EXAMPLE`.
-    pub static TOML_EXAMPLE: TomlExample = #[toml] r#"
+    pub static TOML_EXAMPLE: TomlExample = r#"
         title = "TOML Example"
 
         [owner]
@@ -38,12 +38,6 @@ config! {
         yaml = 2001
         toml = 2013
     "#;
-
-    /// Every `config!()` block may contain multiple config items.
-    /// Types can be ellided if we do not care its type.
-    pub static ANOTHER_CONFIG: _ = #[json] r#"{
-        "title": "JSON Example"
-    }"#;
 }
 
 fn primitive_types() {
@@ -149,9 +143,9 @@ fn user_types() {
 }
 
 fn optional_types() {
-    config! {
+    json_config! {
         // Note, some formats like toml do not have null types.
-        static JSON_CONFIG: _ = #[json] r#"
+        static JSON_CONFIG: JsonConfig = r#"
         {
             "name": "Tom Preston-Werner",
             "preferred-name": null,
@@ -174,14 +168,14 @@ fn optional_types() {
 }
 
 fn overwrite() {
-    config! {
+    json_config! {
         // Use `+` to chain multiple config sources. The latter overwrites the former.
-        static CHAINED_CONFIG: _ = #[json] r#"
+        static CHAINED_CONFIG: ChainedConfig = r#"
         {
             "name": "Tom Preston-Werner",
             "preferred-name": null
         }
-        "# + #[json] r#"
+        "# + r#"
         {
             "preferred-name": "Tom",
             "year-of-birth": 1979
@@ -199,20 +193,20 @@ fn overwrite() {
 }
 
 fn get_trait() {
-    config! {
-        static PRIMARY_CONFIG: _ = #[json] r#"
+    json_config! {
+        static PRIMARY_CONFIG: PrimaryConfig = r#"
         {
             "name": "Tom Preston-Werner",
             "preferred-name": null
         }
         "#;
 
-        static CHAINED_CONFIG: _ = #[json] r#"
+        static CHAINED_CONFIG: ChainedConfig = r#"
         {
             "name": "Tom Preston-Werner",
             "preferred-name": null
         }
-        "# + #[json] r#"
+        "# + r#"
         {
             "preferred-name": "Tom",
             "year-of-birth": 1979
@@ -249,35 +243,6 @@ fn implemented_traits() {
     println!("{:?}", TOML_EXAMPLE);
 }
 
-fn shared_type() {
-    // Multiple configs may share the same type name.
-    config! {
-        static CONFIG_A: Config = #[json] r#"
-        {
-            "name": "Tom Preston-Werner",
-            "preferred-name": "Tom",
-            "year-of-birth": 1979
-        }
-        "#;
-
-        static CONFIG_B: Config = #[json] r#"
-        {
-            "name": "Lamport",
-            "preferred-name": null
-        }
-        "#;
-    }
-
-    // In this case, the `Get` trait implements the intersection of all variants.
-    let preferred_name: Option<&str> = CONFIG_A.get(path!("preferred-name"));
-    println!("{preferred_name:?}");
-    let preferred_name: Option<&str> = CONFIG_B.get(path!("preferred-name"));
-    println!("{preferred_name:?}");
-
-    // This does not fall in the intersection, hence will cause compile error.
-    // let year_of_birth: u32 = CONFIG_A.get(path!("year-of-birth"));
-}
-
 fn main() {
     println!("\n* primitive_types\n");
     primitive_types();
@@ -293,6 +258,4 @@ fn main() {
     get_trait();
     println!("\n* implemented_traits\n");
     implemented_traits();
-    println!("\n* shared_type\n");
-    shared_type();
 }

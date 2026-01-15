@@ -5,21 +5,20 @@
 //! Below is a basic example illustrating how to declare a static config item and access data from it.
 //!
 //! ```
-//! use inline_config::{Get, config, path};
+//! use inline_config::{Get, toml_config, path};
 //!
-//! config! {
+//! toml_config! {
 //!     // Just looks like a typical static item declaration.
 //!     // Apart from the static item, a type `MyConfig` will be generated as well.
-//!     // `#[toml]` is needed to specify the format of this source.
 //!     // Including a file from disk is also possible, see `examples/include.rs`
-//!     pub static MY_CONFIG: MyConfig = #[toml] r#"
+//!     pub static MY_CONFIG: MyConfig = r#"
 //!         title = "TOML example"
 //!
 //!         [server]
 //!         owner = "Tom"
 //!         timeout = 2000
 //!         ports = [ 8000, 8001, 8002 ]
-//!     "# + #[toml] r#"
+//!     "# + r#"
 //!         [server]
 //!         timeout = 5000
 //!     "#;
@@ -45,14 +44,36 @@
 //! assert_eq!([8000, 8001, 8002].to_vec(), ports);
 //! ```
 //!
-//! See [`config!()`] and [`path!()`] for specs on those macros.
+//! ## Config block specification
 //!
-//! ## Feature flags
+//! A config block may contain any number of config items, in the form illustrated below:
 //!
-//! * `json` - supports JSON file format. Enabled by default.
-//! * `yaml` - supports YAML file format. Enabled by default.
-//! * `toml` - supports TOML file format. Enabled by default.
-//! * `indexmap` - enables preserving orders of tables.
+//! ```ignore
+//! <FORMAT>_config! {
+//!     <VIS> static <IDENT>: <TYPE> = <SRC>;
+//!     <VIS> static <IDENT>: <TYPE> = <SRC> + <SRC> + <SRC>;
+//! }
+//! ```
+//!
+//! Each declaration is simply a typical static item with a new type to be generated.
+//! `<IDENT>`s shall not collide; `<TYPE>`s shall not collide.
+//! After expansion the following symbols are brought into scope:
+//!
+//! * Static items, one for each `<IDENT>`;
+//! * Type items, one for each `<TYPE>`, deriving traits `Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd`;
+//! * Mod items, one for each `__<IDENT:lower>` (for internal usage).
+//!
+//! The expression part looks like a sum of sources.
+//! This is where overwriting takes place. All variants are completely overwritten except for tables, which got merged recursively.
+//! Every `<SRC>` takes one of the following forms:
+//!
+//! * `r#"name = "Tom""#` - an inline literal config.
+//! * `include_config!("example_config.toml")` - a file inclusion. The path is resolved relative to the current file (similar to [`include_str!()`]).
+//! * `include_config_env!("$CARGO_MANIFEST_DIR/examples/example_config.toml")` - also a file inclusion, but environment variables of form `$ENV_VAR` are interpolated. Escape `$` with `$$`.
+//!
+//! The support of environment variable interpolation is to aid any code analyzer to locate files,
+//! as environment variables like `$CARGO_MANIFEST_DIR` and `$OUT_DIR` resolve to absolute paths.
+//! This is mostly inspired by [include_dir](https://docs.rs/include_dir/latest/include_dir/) crate.
 //!
 //! ## Compatible types
 //!
@@ -101,47 +122,29 @@
 //!
 //! For consistency, you can also request `Option<T>` from a non-null value as long as `T` can be accessed from it,
 //! and the result will be additionally wrapped by a `Some`.
+//!
+//! ## Feature flags
+//!
+//! * `json` - supports JSON file format. Enabled by default.
+//! * `yaml` - supports YAML file format. Enabled by default.
+//! * `toml` - supports TOML file format. Enabled by default.
+//! * `indexmap` - enables preserving orders of tables.
 
 mod convert;
 mod key;
 mod repr;
 
-/// Declares static variables containing config data.
-///
-/// A config block may contain any number of config items, in the form illustrated below:
-///
-/// ```ignore
-/// config! {
-///     <VIS> static <IDENT>: <TYPE> = <SRC>;
-///     <VIS> static <IDENT>: <TYPE> = <SRC> + <SRC> + <SRC>;
-///     <VIS> static <IDENT>: _ = <SRC>;
-///     <VIS> static <IDENT>: _ = <SRC> + <SRC> + <SRC>;
-/// }
-/// ```
-///
-/// Each declaration is simply a typical static item with a possibly ellided type.
-/// The `<IDENT>`s shall not collide; `<TYPE>`s may collide.
-/// After expansion the following symbols are brought into scope:
-///
-/// * Static items, one for each `<IDENT>`;
-/// * Type items, one for each unique `<TYPE>`, one for each `__<IDENT:upper_camel>` whose type is ellided;
-/// * Mod items, one for each `__<IDENT:snake>`.
-///
-/// Those prefixed with double underscores are only meant for internal usage only.
-/// All generated types will derive `Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd`.
-///
-/// The expression part looks like a sum of sources.
-/// This is where overwriting takes place. All variants are completely overwritten except for tables, which got merged recursively.
-/// Every `<SRC>` takes one of the following forms:
-///
-/// * `#[toml] r#"name = "Tom""#` - an inline literal config. We require an attribute to specify the format of config.
-/// * `include_config!("example_config.toml")` - a file inclusion. The path is resolved relative to the current file (similar to [`include_str!()`]). The format specifier attribute may be omitted if it's clear from the file extension.
-/// * `include_config_env!("$CARGO_MANIFEST_DIR/examples/example_config.toml")` - also a file inclusion, but environment variables of form `$ENV_VAR` are interpolated. Escape `$` with `$$`.
-///
-/// The support of environment variable interpolation is to aid any code analyzer to locate files,
-/// as environment variables like `$CARGO_MANIFEST_DIR` and `$OUT_DIR` resolve to absolute paths.
-/// This is mostly inspired by [include_dir](https://docs.rs/include_dir/latest/include_dir/) crate.
-pub use inline_config_macros::config;
+/// Declares static variables containing config data in JSON format.
+#[cfg(feature = "json")]
+pub use inline_config_macros::json_config;
+
+/// Declares static variables containing config data in YAML format.
+#[cfg(feature = "yaml")]
+pub use inline_config_macros::yaml_config;
+
+/// Declares static variables containing config data in TOML format.
+#[cfg(feature = "toml")]
+pub use inline_config_macros::toml_config;
 
 /// Constructs a path with which one accesses a nested-in piece of data from config.
 ///

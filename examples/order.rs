@@ -1,7 +1,7 @@
-use inline_config::{config, path, Get};
+use inline_config::{Get, path, toml_config};
 
-config! {
-    pub static MY_CONFIG: _ = #[toml] r#"
+toml_config! {
+    pub static MY_CONFIG: MyConfig = r#"
         [fruits]
         apple = "red"
         orange = "orange"
