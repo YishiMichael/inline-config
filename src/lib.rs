@@ -10,7 +10,7 @@
 //! toml_config! {
 //!     // Just looks like a typical static item declaration.
 //!     // Apart from the static item, a type `MyConfig` will be generated as well.
-//!     // Including a file from disk is also possible, see `examples/include.rs`
+//!     // Including a file from disk is also possible, see `examples/include.rs`.
 //!     pub static MY_CONFIG: MyConfig = r#"
 //!         title = "TOML example"
 //!

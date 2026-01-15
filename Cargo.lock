@@ -72,7 +72,7 @@ dependencies = [
 
 [[package]]
 name = "inline-config"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "indexmap",
  "inline-config-macros",
@@ -81,7 +81,7 @@ dependencies = [
 
 [[package]]
 name = "inline-config-macros"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "darling",
  "indexmap",

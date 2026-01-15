@@ -7,7 +7,7 @@ Effortlessly embed config as static data and access with any compatible data str
 [![Docs](https://img.shields.io/docsrs/inline-config?style=for-the-badge&logo=docs.rs)](https://docs.rs/inline-config)
 [![CI](https://img.shields.io/github/actions/workflow/status/YishiMichael/inline-config/rust.yml?style=for-the-badge&logo=github&label=CI)](https://github.com/YishiMichael/inline-config)
 
-Procedual macros [`*_config!()`] are provided to parse sources at compile time, generate static data structures, from which we can access values via the [`Get`](https://docs.rs/inline-config/latest/inline_config/trait.Get.html) trait. The output types of accessed values can be almost "at will", as long as they are compatible.
+Procedual macros `*_config!()` are provided to parse sources at compile time, generate static data structures, from which we can access values via the [`Get`](https://docs.rs/inline-config/latest/inline_config/trait.Get.html) trait. The output types of accessed values can be almost "at will", as long as they are compatible.
 
 ## Features
 
@@ -26,7 +26,7 @@ Add `inline-config` to your dependencies
 cargo add inline-config
 ```
 
-In your source file, declare a static variable using [`*_config!()`] holding the config data
+In your source file, declare a static variable using `*_config!()` holding the config data
 
 ```rust
 use inline_config::toml_config;
@@ -34,7 +34,7 @@ use inline_config::toml_config;
 toml_config! {
     // Just looks like a typical static item declaration.
     // Apart from the static item, a type `MyConfig` will be generated as well.
-    // Including a file from disk is also possible, see `examples/include.rs`
+    // Including a file from disk is also possible, see `examples/include.rs`.
     pub static MY_CONFIG: MyConfig = r#"
         title = "TOML example"
 
@@ -49,7 +49,7 @@ toml_config! {
 }
 ```
 
-Then, access the data inside using the [`Get`](https://docs.rs/inline-config/latest/inline_config/trait.Get.html) trait in combination with the [`path!`](https://docs.rs/inline-config/latest/inline_config/macro.path.html) macro
+Then, access the data inside using the [`Get`](https://docs.rs/inline-config/latest/inline_config/trait.Get.html) trait in combination with the [`path!()`](https://docs.rs/inline-config/latest/inline_config/macro.path.html) macro
 
 ```rust
 use inline_config::{Get, path};
