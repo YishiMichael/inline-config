@@ -15,34 +15,36 @@ where
     }
 }
 
-#[cfg(feature = "json")]
 #[proc_macro_error::proc_macro_error]
-#[proc_macro]
-pub fn json_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(
-        std::convert::identity::<config_repr::ConfigBlock<format::json::JsonFormat>>,
-        input,
-    )
-}
+#[proc_macro_attribute]
+pub fn config(
+    input: proc_macro::TokenStream,
+    item: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    match syn::parse::<syn::Ident>(input) {
+        Ok(ident) => match ident.to_string().as_str() {
+            #[cfg(feature = "json")]
+            "json" => delegate_macro(
+                std::convert::identity::<config_repr::ConfigItem<format::json::JsonFormat>>,
+                item,
+            ),
 
-#[cfg(feature = "yaml")]
-#[proc_macro_error::proc_macro_error]
-#[proc_macro]
-pub fn yaml_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(
-        std::convert::identity::<config_repr::ConfigBlock<format::yaml::YamlFormat>>,
-        input,
-    )
-}
+            #[cfg(feature = "yaml")]
+            "yaml" => delegate_macro(
+                std::convert::identity::<config_repr::ConfigItem<format::yaml::YamlFormat>>,
+                item,
+            ),
 
-#[cfg(feature = "toml")]
-#[proc_macro_error::proc_macro_error]
-#[proc_macro]
-pub fn toml_config(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(
-        std::convert::identity::<config_repr::ConfigBlock<format::toml::TomlFormat>>,
-        input,
-    )
+            #[cfg(feature = "toml")]
+            "toml" => delegate_macro(
+                std::convert::identity::<config_repr::ConfigItem<format::toml::TomlFormat>>,
+                item,
+            ),
+
+            _ => proc_macro_error::abort!(ident, "unsupported format"),
+        },
+        Err(e) => proc_macro_error::abort!(e.span(), e),
+    }
 }
 
 #[proc_macro_error::proc_macro_error]
@@ -60,6 +62,6 @@ pub fn Path(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 #[proc_macro_error::proc_macro_error]
 #[proc_macro_derive(ConfigData, attributes(config_data))]
-pub fn config_data(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    delegate_macro(config_data::config_data, input)
+pub fn config_data(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    delegate_macro(config_data::config_data, item)
 }

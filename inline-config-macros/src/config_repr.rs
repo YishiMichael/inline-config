@@ -2,59 +2,120 @@ use crate::format::Format;
 use crate::path::Key;
 use crate::value::Value;
 
-pub struct ConfigBlock<F> {
+pub struct ConfigItem<F> {
     format: std::marker::PhantomData<F>,
-    items: Vec<ConfigItem<F>>,
-}
-
-struct ConfigItem<F> {
-    format: std::marker::PhantomData<F>,
-    attrs: Vec<syn::Attribute>,
-    vis: syn::Visibility,
-    mutability: syn::StaticMutability,
     ident: syn::Ident,
     ty: syn::Ident,
     value: Value,
+    #[allow(clippy::type_complexity)]
+    item_fn: Box<dyn Fn(&syn::Ident, &syn::Type, &syn::Expr) -> syn::Item>,
 }
 
-impl<F: Format> syn::parse::Parse for ConfigBlock<F> {
+impl<F: Format> syn::parse::Parse for ConfigItem<F> {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        let mut items = vec![];
-        while !input.is_empty() {
-            items.push(ConfigItem::from_item_static(input.parse()?)?);
+        match input.parse()? {
+            syn::Item::Static(syn::ItemStatic {
+                attrs,
+                vis,
+                static_token,
+                mutability,
+                ident,
+                colon_token,
+                ty,
+                eq_token,
+                expr,
+                semi_token,
+            }) => Ok(Self {
+                format: std::marker::PhantomData,
+                ident,
+                ty: Self::ident_from_ty(&ty)?,
+                value: Self::value_from_expr(&expr)?,
+                item_fn: Box::new(move |ident, ty, expr| {
+                    syn::parse_quote! {
+                        #(#attrs)*
+                        #vis #static_token #mutability #ident #colon_token #ty #eq_token #expr #semi_token
+                    }
+                }),
+            }),
+            syn::Item::Const(syn::ItemConst {
+                attrs,
+                vis,
+                const_token,
+                ident,
+                generics,
+                colon_token,
+                ty,
+                eq_token,
+                expr,
+                semi_token,
+            }) => Ok(Self {
+                format: std::marker::PhantomData,
+                ident,
+                ty: Self::ident_from_ty(&ty)?,
+                value: Self::value_from_expr(&expr)?,
+                item_fn: Box::new(move |ident, ty, expr| {
+                    syn::parse_quote! {
+                        #(#attrs)*
+                        #vis #const_token #ident #generics #colon_token #ty #eq_token #expr #semi_token
+                    }
+                }),
+            }),
+            item => Err(syn::Error::new_spanned(
+                item,
+                "expected static or const item",
+            )),
         }
-        Ok(Self {
-            format: std::marker::PhantomData,
-            items,
-        })
     }
 }
 
-impl<F: Format> quote::ToTokens for ConfigBlock<F> {
+impl<F: Format> quote::ToTokens for ConfigItem<F> {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        self.items.iter().for_each(|config_item| {
-            let (item_static, item_mod, item_struct, item_impl) = config_item.token_items();
-            item_static.to_tokens(tokens);
-            item_mod.to_tokens(tokens);
-            item_struct.to_tokens(tokens);
-            item_impl.to_tokens(tokens);
-        });
+        let Self {
+            format: _,
+            ident,
+            ty,
+            value,
+            item_fn,
+        } = self;
+        let mod_ident = quote::format_ident!("__{}", ident.to_string().to_lowercase());
+        let item = item_fn(
+            ident,
+            &syn::parse_quote! { #ty },
+            &syn::parse_quote! { #ty(#mod_ident::expr()) },
+        );
+        let item_mod = ConfigReprMod::from_value(value).item_mod(&mod_ident);
+        let item_struct: syn::ItemStruct = syn::parse_quote! {
+            #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+            pub struct #ty(pub #mod_ident::Type);
+        };
+        let item_impl: syn::ItemImpl = syn::parse_quote! {
+            impl<P, T> ::inline_config::Get<P, T> for #ty
+            where
+                #mod_ident::Type:
+                    ::inline_config::__private::AccessPath<P>,
+                <#mod_ident::Type as ::inline_config::__private::AccessPath<P>>::Repr:
+                    ::inline_config::__private::ConvertRepr<T>,
+            {
+                fn get(&'static self, _path: P) -> T {
+                    <
+                        <#mod_ident::Type as ::inline_config::__private::AccessPath<P>>::Repr
+                            as ::inline_config::__private::ConvertRepr<T>
+                    >::convert_repr(
+                        <#mod_ident::Type as ::inline_config::__private::AccessPath<P>>::access_path(
+                            &self.0,
+                        ),
+                    )
+                }
+            }
+        };
+        item.to_tokens(tokens);
+        item_mod.to_tokens(tokens);
+        item_struct.to_tokens(tokens);
+        item_impl.to_tokens(tokens);
     }
 }
 
 impl<F: Format> ConfigItem<F> {
-    fn from_item_static(item_static: syn::ItemStatic) -> syn::Result<Self> {
-        Ok(Self {
-            format: std::marker::PhantomData,
-            attrs: item_static.attrs,
-            vis: item_static.vis,
-            mutability: item_static.mutability,
-            ident: item_static.ident,
-            ty: Self::ident_from_ty(&item_static.ty)?,
-            value: Self::value_from_expr(&item_static.expr)?,
-        })
-    }
-
     fn ident_from_ty(ty: &syn::Type) -> syn::Result<syn::Ident> {
         match ty {
             syn::Type::Path(syn::TypePath { qself: None, path }) => path.require_ident().cloned(),
@@ -143,56 +204,6 @@ impl<F: Format> ConfigItem<F> {
             resolved.push_str(&std::env::var(&variable)?);
         }
         Ok(resolved)
-    }
-
-    fn token_items(
-        &self,
-    ) -> (
-        syn::ItemStatic,
-        syn::ItemMod,
-        syn::ItemStruct,
-        syn::ItemImpl,
-    ) {
-        let Self {
-            format: _,
-            attrs,
-            vis,
-            mutability,
-            ident,
-            ty,
-            value,
-        } = self;
-        let mod_ident = quote::format_ident!("__{}", ident.to_string().to_lowercase());
-        let item_static: syn::ItemStatic = syn::parse_quote! {
-            #(#attrs)*
-            #vis #mutability static #ident: #ty = #ty(#mod_ident::EXPR);
-        };
-        let item_mod = ConfigReprMod::from_value(value).item_mod(&mod_ident);
-        let item_struct: syn::ItemStruct = syn::parse_quote! {
-            #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-            pub struct #ty(pub #mod_ident::Type);
-        };
-        let item_impl: syn::ItemImpl = syn::parse_quote! {
-            impl<P, T> ::inline_config::Get<P, T> for #ty
-            where
-                #mod_ident::Type:
-                    ::inline_config::__private::AccessPath<P>,
-                <#mod_ident::Type as ::inline_config::__private::AccessPath<P>>::Repr:
-                    ::inline_config::__private::ConvertRepr<T>,
-            {
-                fn get(&'static self, _path: P) -> T {
-                    <
-                        <#mod_ident::Type as ::inline_config::__private::AccessPath<P>>::Repr
-                            as ::inline_config::__private::ConvertRepr<T>
-                    >::convert_repr(
-                        <#mod_ident::Type as ::inline_config::__private::AccessPath<P>>::access_path(
-                            &self.0,
-                        ),
-                    )
-                }
-            }
-        };
-        (item_static, item_mod, item_struct, item_impl)
     }
 }
 
@@ -290,7 +301,7 @@ impl ConfigReprMod {
                     #mod_ident::Type
                 };
                 let member_expr: syn::Expr = syn::parse_quote! {
-                    #mod_ident::EXPR
+                    #mod_ident::expr()
                 };
                 (
                     Self::from_value(value).item_mod(&mod_ident),
@@ -304,7 +315,7 @@ impl ConfigReprMod {
             },
             expr: syn::parse_quote! {
                 ::inline_config::__private::ReprContainer(Struct {
-                    #(#members: &#member_exprs,)*
+                    #(#members: #member_exprs,)*
                 })
             },
             item_struct: Some(
@@ -315,14 +326,14 @@ impl ConfigReprMod {
                     syn::parse_quote! {
                         #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
                         pub struct Struct(
-                            #(pub &'static #member_tys,)*
+                            #(pub #member_tys,)*
                         );
                     }
                 } else {
                     syn::parse_quote! {
                         #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
                         pub struct Struct {
-                            #(pub #members: &'static #member_tys,)*
+                            #(pub #members: #member_tys,)*
                         }
                     }
                 },
@@ -337,7 +348,7 @@ impl ConfigReprMod {
                         impl ::inline_config::__private::Access<#key_ty> for Struct {
                             type Repr = #member_ty;
 
-                            fn access(&self) -> &Self::Repr {
+                            fn access(&'static self) -> &Self::Repr {
                                 &self.#member
                             }
                         }
@@ -370,7 +381,7 @@ impl ConfigReprMod {
                             where
                                 #(#predicates,)*
                             {
-                                fn convert(&self) -> #ty {
+                                fn convert(&'static self) -> #ty {
                                     #expr
                                 }
                             }
@@ -393,7 +404,9 @@ impl ConfigReprMod {
         syn::parse_quote! {
             pub mod #mod_ident {
                 pub type Type = #ty;
-                pub static EXPR: Type = #expr;
+                pub const fn expr() -> Type {
+                    #expr
+                }
                 #item_struct
                 #(#field_mods)*
                 #(#access_impls)*

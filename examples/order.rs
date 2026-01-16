@@ -1,13 +1,12 @@
-use inline_config::{Get, path, toml_config};
+use inline_config::{Get, config, path};
 
-toml_config! {
-    pub static MY_CONFIG: MyConfig = r#"
-        [fruits]
-        apple = "red"
-        orange = "orange"
-        grape = "purple"
-    "#;
-}
+#[config(toml)]
+pub static MY_CONFIG: MyConfig = r#"
+    [fruits]
+    apple = "red"
+    orange = "orange"
+    grape = "purple"
+"#;
 
 fn main() {
     // `BTreeMap` yields key-value pairs in lexicographical order of keys.

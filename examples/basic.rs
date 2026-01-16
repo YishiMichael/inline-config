@@ -1,44 +1,43 @@
-use inline_config::{ConfigData, Get, Path, json_config, path, toml_config};
+use inline_config::{ConfigData, Get, Path, config, path};
 
-toml_config! {
-    /// Edited from TOML official example.
-    /// This defines a type `TomlExample` and a static variable `TOML_EXAMPLE`.
-    pub static TOML_EXAMPLE: TomlExample = r#"
-        title = "TOML Example"
+#[config(toml)]
+/// Edited from TOML official example.
+/// This defines a type `TomlExample` and a static variable `TOML_EXAMPLE`.
+pub static TOML_EXAMPLE: TomlExample = r#"
+    title = "TOML Example"
 
-        [owner]
-        name = "Tom Preston-Werner"
-        dob = "1979-05-27"
-        date-of-birth = "1979-05-27"
-        mod = "toml"
+    [owner]
+    name = "Tom Preston-Werner"
+    dob = "1979-05-27"
+    date-of-birth = "1979-05-27"
+    mod = "toml"
 
-        [database]
-        server = "192.168.1.1"
-        ports = [ 8000, 8001, 8002 ]
-        connection_max = 5000
-        enabled = true
+    [database]
+    server = "192.168.1.1"
+    ports = [ 8000, 8001, 8002 ]
+    connection_max = 5000
+    enabled = true
 
-        [servers.alpha]
-        ip = "10.0.0.1"
-        dc = "eqdc10"
+    [servers.alpha]
+    ip = "10.0.0.1"
+    dc = "eqdc10"
 
-        [servers.beta]
-        ip = "10.0.0.2"
-        dc = "eqdc10"
+    [servers.beta]
+    ip = "10.0.0.2"
+    dc = "eqdc10"
 
-        [clients]
-        data = [ ["gamma", "delta"], [1, 2] ]
-        hosts = [
-          "alpha",
-          "omega"
-        ]
+    [clients]
+    data = [ ["gamma", "delta"], [1, 2] ]
+    hosts = [
+      "alpha",
+      "omega"
+    ]
 
-        [languages]
-        json = 2001
-        yaml = 2001
-        toml = 2013
-    "#;
-}
+    [languages]
+    json = 2001
+    yaml = 2001
+    toml = 2013
+"#;
 
 fn primitive_types() {
     // Get a string at field `title`.
@@ -143,16 +142,15 @@ fn user_types() {
 }
 
 fn optional_types() {
-    json_config! {
-        // Note, some formats like toml do not have null types.
-        static JSON_CONFIG: JsonConfig = r#"
-        {
-            "name": "Tom Preston-Werner",
-            "preferred-name": null,
-            "servers": null
-        }
-        "#;
+    // Note, some formats like toml do not have null types.
+    #[config(json)]
+    static JSON_CONFIG: JsonConfig = r#"
+    {
+        "name": "Tom Preston-Werner",
+        "preferred-name": null,
+        "servers": null
     }
+    "#;
 
     // Any non-null `T` can be converted into `Some(T)` for free.
     let name: String = JSON_CONFIG.get(path!(name));
@@ -168,20 +166,19 @@ fn optional_types() {
 }
 
 fn overwrite() {
-    json_config! {
-        // Use `+` to chain multiple config sources. The latter overwrites the former.
-        static CHAINED_CONFIG: ChainedConfig = r#"
-        {
-            "name": "Tom Preston-Werner",
-            "preferred-name": null
-        }
-        "# + r#"
-        {
-            "preferred-name": "Tom",
-            "year-of-birth": 1979
-        }
-        "#;
+    // Use `+` to chain multiple config sources. The latter overwrites the former.
+    #[config(json)]
+    static CHAINED_CONFIG: ChainedConfig = r#"
+    {
+        "name": "Tom Preston-Werner",
+        "preferred-name": null
     }
+    "# + r#"
+    {
+        "preferred-name": "Tom",
+        "year-of-birth": 1979
+    }
+    "#;
 
     // `preferred-name` is overwritten by the latter config source.
     let preferred_name: Option<&str> = CHAINED_CONFIG.get(path!("preferred-name"));
@@ -193,26 +190,26 @@ fn overwrite() {
 }
 
 fn get_trait() {
-    json_config! {
-        static PRIMARY_CONFIG: PrimaryConfig = r#"
-        {
-            "name": "Tom Preston-Werner",
-            "preferred-name": null
-        }
-        "#;
-
-        static CHAINED_CONFIG: ChainedConfig = r#"
-        {
-            "name": "Tom Preston-Werner",
-            "preferred-name": null
-        }
-        "# + r#"
-        {
-            "preferred-name": "Tom",
-            "year-of-birth": 1979
-        }
-        "#;
+    #[config(json)]
+    static PRIMARY_CONFIG: PrimaryConfig = r#"
+    {
+        "name": "Tom Preston-Werner",
+        "preferred-name": null
     }
+    "#;
+
+    #[config(json)]
+    static CHAINED_CONFIG: ChainedConfig = r#"
+    {
+        "name": "Tom Preston-Werner",
+        "preferred-name": null
+    }
+    "# + r#"
+    {
+        "preferred-name": "Tom",
+        "year-of-birth": 1979
+    }
+    "#;
 
     // After overwriting, the two configs have different types.
     // The `Get` trait modeled their shared data-getting behavior.
