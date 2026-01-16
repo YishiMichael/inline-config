@@ -1,5 +1,4 @@
 use crate::format::Format;
-use crate::lit_expand::Lit;
 use crate::path::Key;
 use crate::value::Value;
 
@@ -79,7 +78,12 @@ pub fn config(input: syn::Ident, item: syn::Item) -> syn::Result<ConfigTokenItem
                 value_from_expr(&binary.left, format)? + value_from_expr(&binary.right, format)?
             ),
             expr => format
-                .parse(&syn::parse2::<Lit>(quote::ToTokens::to_token_stream(expr))?.expand()?)
+                .parse(
+                    &syn::parse2::<macro_string::MacroString>(quote::ToTokens::to_token_stream(
+                        expr,
+                    ))?
+                    .0,
+                )
                 .map_err(|e| syn::Error::new_spanned(expr, e)),
         }
     }
@@ -122,174 +126,6 @@ pub fn config(input: syn::Ident, item: syn::Item) -> syn::Result<ConfigTokenItem
         },
     })
 }
-
-// fn lit_from_expr(expr: &syn::Expr) -> syn::Result<String> {
-//     match expr {
-//         syn::Expr::Lit(syn::ExprLit {
-//             attrs: _,
-//             lit: syn::Lit::Str(text_lit),
-//         }) => Ok(text_lit.value()),
-
-//         syn::Expr::Macro(syn::ExprMacro { attrs: _, mac }) => {
-//             let path_lit: syn::LitStr = syn::parse2(mac.tokens.clone())?;
-//             let path = match mac.path.require_ident()?.to_string().as_str() {
-//                 "include_str" => Ok(std::path::PathBuf::from(path_lit.value())),
-//                 "include_config_env" => Self::resolve_env(&path_lit.value())
-//                     .map(std::path::PathBuf::from)
-//                     .map_err(|e| syn::Error::new_spanned(&path_lit, e)),
-//                 _ => Err(syn::Error::new_spanned(&mac.path, "expected `include_str`")),
-//             }?;
-
-//             // Resolve the path relative to the current file.
-//             let path = if path.is_absolute() {
-//                 path
-//             } else {
-//                 // Rust analyzer hasn't implemented `Span::file()`.
-//                 // https://github.com/rust-lang/rust-analyzer/issues/15950
-//                 std::path::PathBuf::from(proc_macro2::Span::call_site().file())
-//                     .parent()
-//                     .ok_or(syn::Error::new_spanned(
-//                         &path_lit,
-//                         "cannot retrieve parent dir",
-//                     ))?
-//                     .join(path)
-//             };
-
-//             let text =
-//                 std::fs::read_to_string(path).map_err(|e| syn::Error::new_spanned(&path_lit, e))?;
-//             F::parse(&text).map_err(|e| syn::Error::new_spanned(expr, e))
-//         }
-
-//         _ => Err(syn::Error::new_spanned(
-//             expr,
-//             "expected string literal or macro invocation",
-//         )),
-//     }
-// }
-
-// pub struct ConfigItem<F> {
-//     format: std::marker::PhantomData<F>,
-//     ident: syn::Ident,
-//     ty: syn::Ident,
-//     value: Value,
-//     #[allow(clippy::type_complexity)]
-//     item_fn: Box<dyn Fn(&syn::Ident, &syn::Type, &syn::Expr) -> syn::Item>,
-// }
-
-// impl<F: Format> syn::parse::Parse for ConfigItem<F> {
-//     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-//         match input.parse()? {
-//             syn::Item::Static(syn::ItemStatic {
-//                 attrs,
-//                 vis,
-//                 static_token,
-//                 mutability,
-//                 ident,
-//                 colon_token,
-//                 ty,
-//                 eq_token,
-//                 expr,
-//                 semi_token,
-//             }) => Ok(Self {
-//                 format: std::marker::PhantomData,
-//                 ident,
-//                 ty: Self::ident_from_ty(&ty)?,
-//                 value: Self::value_from_expr(&expr)?,
-//                 item_fn: Box::new(move |ident, ty, expr| {
-//                     syn::parse_quote! {
-//                         #(#attrs)*
-//                         #vis #static_token #mutability #ident #colon_token #ty #eq_token #expr #semi_token
-//                     }
-//                 }),
-//             }),
-//             syn::Item::Const(syn::ItemConst {
-//                 attrs,
-//                 vis,
-//                 const_token,
-//                 ident,
-//                 generics,
-//                 colon_token,
-//                 ty,
-//                 eq_token,
-//                 expr,
-//                 semi_token,
-//             }) => Ok(Self {
-//                 format: std::marker::PhantomData,
-//                 ident,
-//                 ty: Self::ident_from_ty(&ty)?,
-//                 value: Self::value_from_expr(&expr)?,
-//                 item_fn: Box::new(move |ident, ty, expr| {
-//                     syn::parse_quote! {
-//                         #(#attrs)*
-//                         #vis #const_token #ident #generics #colon_token #ty #eq_token #expr #semi_token
-//                     }
-//                 }),
-//             }),
-//             item => Err(syn::Error::new_spanned(
-//                 item,
-//                 "expected static or const item",
-//             )),
-//         }
-//     }
-// }
-
-// impl<F: Format> quote::ToTokens for ConfigItem<F> {
-//     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-//         let Self {
-//             format: _,
-//             ident,
-//             ty,
-//             value,
-//             item_fn,
-//         } = self;
-
-//         item.to_tokens(tokens);
-//         item_mod.to_tokens(tokens);
-//         item_struct.to_tokens(tokens);
-//         item_impl.to_tokens(tokens);
-//     }
-// }
-
-// impl<F: Format> ConfigItem<F> {
-//     fn ident_from_ty(ty: &syn::Type) -> syn::Result<syn::Ident> {
-//         match ty {
-//             syn::Type::Path(syn::TypePath { qself: None, path }) => path.require_ident().cloned(),
-//             _ => Err(syn::Error::new_spanned(
-//                 ty,
-//                 "config type must be an identifier",
-//             )),
-//         }
-//     }
-
-//     // Resolve `$ENV_VAR` in a given path.
-//     // Inspired from `include_dir::resolve_env`.
-//     fn resolve_env(path: &str) -> Result<String, std::env::VarError> {
-//         let mut chars = path.chars().peekable();
-//         let mut resolved = String::new();
-//         while let Some(c) = chars.next() {
-//             if c != '$' {
-//                 resolved.push(c);
-//                 continue;
-//             }
-//             if chars.peek() == Some(&'$') {
-//                 chars.next();
-//                 resolved.push('$');
-//                 continue;
-//             }
-//             let mut variable = String::new();
-//             while let Some(&c) = chars.peek() {
-//                 if matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '_') {
-//                     chars.next();
-//                     variable.push(c);
-//                 } else {
-//                     break;
-//                 }
-//             }
-//             resolved.push_str(&std::env::var(&variable)?);
-//         }
-//         Ok(resolved)
-//     }
-// }
 
 struct ConfigReprMod {
     ty: syn::Type,

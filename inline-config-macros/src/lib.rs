@@ -1,7 +1,6 @@
 mod config;
 mod config_data;
 mod format;
-mod lit_expand;
 mod path;
 mod value;
 
@@ -42,30 +41,6 @@ pub fn config(
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     delegate_macro2(config::config, input, item)
-    // match syn::parse::<syn::Ident>(input) {
-    //     Ok(ident) => match ident.to_string().as_str() {
-    //         #[cfg(feature = "json")]
-    //         "json" => delegate_macro(
-    //             std::convert::identity::<config_repr::ConfigItem<format::json::JsonFormat>>,
-    //             item,
-    //         ),
-
-    //         #[cfg(feature = "yaml")]
-    //         "yaml" => delegate_macro(
-    //             std::convert::identity::<config_repr::ConfigItem<format::yaml::YamlFormat>>,
-    //             item,
-    //         ),
-
-    //         #[cfg(feature = "toml")]
-    //         "toml" => delegate_macro(
-    //             std::convert::identity::<config_repr::ConfigItem<format::toml::TomlFormat>>,
-    //             item,
-    //         ),
-
-    //         _ => proc_macro_error::abort!(ident, "unsupported format"),
-    //     },
-    //     Err(e) => proc_macro_error::abort!(e.span(), e),
-    // }
 }
 
 #[proc_macro_error::proc_macro_error]

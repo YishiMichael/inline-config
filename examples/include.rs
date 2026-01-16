@@ -1,12 +1,8 @@
 use inline_config::{Get, config, path};
 
-// Include from a config file adjacent to this file, similar to `include_str!()`.
+// Include from a config file from disk.
 #[config(toml)]
-pub static MY_CONFIG: MyConfig = include_str!("example_config.toml");
-
-// `env!()` yields an absolute path which may help IDE better locate the file.
-#[config(toml)]
-pub static MY_CONFIG_ENV: MyConfigEnv = include_str!(concat!(
+pub static MY_CONFIG: MyConfigEnv = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/examples/example_config.toml",
 ));

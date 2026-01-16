@@ -136,10 +136,9 @@ mod repr;
 ///
 /// Every `<SRC>` shall be a literal string, or a macro invocation expanding into a literal string.
 /// The full support of eager expansion is impossible without [`#[feature(proc_macro_expand)]`](https://github.com/rust-lang/rust/issues/90765).
-/// Therefore, only [`include_str!()`], [`concat!()`], [`env!()`] are supported. So the following are all valid sources:
+/// A subset of eager expansion for built-in macros is handled by [`macro_string`] crate, which identifies both the following as valid sources:
 ///
 /// * `r#"name = "Tom""#`
-/// * `include_str!("example_config.toml")`
 /// * `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/example_config.toml"))`
 ///
 /// The support of environment variables is to aid any code analyzer to locate files,
