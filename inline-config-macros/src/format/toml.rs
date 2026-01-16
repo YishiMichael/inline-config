@@ -1,13 +1,9 @@
 use crate::value::Value;
 use std::error::Error;
 
-pub struct TomlFormat;
-
-impl super::Format for TomlFormat {
-    fn parse(s: &str) -> Result<Value, Box<dyn Error>> {
-        let value = toml::from_str(s)?;
-        morph(value)
-    }
+pub(super) fn parse(s: &str) -> Result<Value, Box<dyn Error>> {
+    let value = toml::from_str(s)?;
+    morph(value)
 }
 
 fn morph(value: toml::Value) -> Result<Value, Box<dyn Error>> {

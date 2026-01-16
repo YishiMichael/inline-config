@@ -43,7 +43,7 @@
 //! assert_eq!([8000, 8001, 8002].to_vec(), ports);
 //! ```
 //!
-//! See [`#[config]`] and [`path!()`] for specs on those macros.
+//! See [`config`] and [`path!()`] for specs on those macros.
 //!
 //! ## Compatible types
 //!
@@ -53,17 +53,17 @@
 //!
 //! | Representation variant | Storage | Compatible types |
 //! |---|---|---|
-//! | Nil | `()` | (See [option types](#option-types)) |
-//! | Boolean | `bool` | `bool` |
-//! | Unsigned Integer | `u64` | `i8`, `i16`, `i32`, `i64`, `i128`, `isize`,<br>`u8`, `u16`, `u32`, `u64`, `u128`, `usize`,<br>`f32`, `f64` |
-//! | Signed Integer | `i64` | `i8`, `i16`, `i32`, `i64`, `i128`, `isize`,<br>`f32`, `f64` |
-//! | Float | `OrderedFloat<f64>`<sup>1</sup> | `f32`, `f64` |
-//! | String | `&'static str` | `&str`, `String` |
-//! | Array | Structs | `Vec<T>` if homogeneous,<br>User-defined structs with unnamed fields |
-//! | Table | Structs | `BTreeMap<&str, T>` if homogeneous,<br>`BTreeMap<String, T>` if homogeneous,<br>`IndexMap<&str, T>` if homogeneous<sup>2</sup>,<br>`IndexMap<String, T>` if homogeneous<sup>2</sup>,<br>User-defined structs with named fields |
+//! | Nil | [`()`](unit) | (See [option types](#option-types)) |
+//! | Boolean | [`bool`] | [`bool`] |
+//! | Unsigned Integer | [`u64`] | [`i8`], [`i16`], [`i32`], [`i64`], [`i128`], [`isize`],<br>[`u8`], [`u16`], [`u32`], [`u64`], [`u128`], [`usize`],<br>[`f32`], [`f64`] |
+//! | Signed Integer | `i64` | [`i8`], [`i16`], [`i32`], [`i64`], [`i128`], [`isize`],<br>[`f32`], [`f64`] |
+//! | Float | [`OrderedFloat<f64>`](ordered_float::OrderedFloat)<sup>1</sup> | [`f32`], [`f64`] |
+//! | String | [`&'static str`](str) | [`&str`], [`String`] |
+//! | Array | Structs | [`Vec<T>`] if homogeneous,<br>User-defined structs with unnamed fields |
+//! | Table | Structs | [`std::collections::BTreeMap<&str, T>`] if homogeneous,<br>[`std::collections::BTreeMap<String, T>`] if homogeneous,<br>[`indexmap::IndexMap<&str, T>`] if homogeneous<sup>2</sup>,<br>[`indexmap::IndexMap<String, T>`] if homogeneous<sup>2</sup>,<br>User-defined structs with named fields |
 //!
 //! Footnotes:
-//! 1. `f64` does not implement `Eq`, `Ord`, `Hash` traits, but [`ordered_float::OrderedFloat<f64>`] does.
+//! 1. [`f64`] does not implement [`Eq`], [`Ord`], [`Hash`](std::hash::Hash) traits, but [`ordered_float::OrderedFloat<f64>`] does.
 //! 2. Only available when enabling `indexmap` feature flag.
 //!
 //! ### Container types
@@ -76,7 +76,7 @@
 //! You need to define custom types and derive [`ConfigData`] if you want to access structured data.
 //! Define structs with unnamed fields to model an array, while structs with named fields to model a table.
 //! Specially, in the case when they do contain homogeneous data,
-//! arrays can be accessed as `Vec<T>`, and tables can be accessed as `BTreeMap<&str, T>` or `BTreeMap<String, T>`,
+//! arrays can be accessed as [`Vec<T>`], and tables can be accessed as [`std::collections::BTreeMap<&str, T>`] or [`std::collections::BTreeMap<String, T>`],
 //! as long as the representation of children can be accessed as `T`.
 //! For containers, this type compatibility comes with a recursive sense.
 //! There's a relevant concept from functional programming, known as [transmogrifying](https://docs.rs/frunk/0.4.4/frunk/#transmogrifying).
@@ -84,14 +84,14 @@
 //! ### Option types
 //!
 //! Some of config formats support null value.
-//! We cannot directly store it as `Option<T>`, as we are not able to tell what `T` is by looking at a literal null.
+//! We cannot directly store it as [`Option<T>`], as we are not able to tell what `T` is by looking at a literal null.
 //! The following behaviors are implemented.
 //!
-//! * When requesting `Option<T>` from null, return `None`;
-//! * When requesting `T` from null, return `T::default()` if `T: Default`.
+//! * When requesting [`Option<T>`] from null, return [`None`];
+//! * When requesting `T` from null, return `T::default()` if `T` implements [`Default`].
 //!
-//! For consistency, you can also request `Option<T>` from a non-null value as long as `T` can be accessed from it,
-//! and the result will be additionally wrapped by a `Some`.
+//! For consistency, you can also request [`Option<T>`] from a non-null value as long as `T` can be accessed from it,
+//! and the result will be additionally wrapped by a [`Some`].
 //!
 //! ## Feature flags
 //!
@@ -128,19 +128,22 @@ mod repr;
 /// After expansion the following symbols are brought into scope:
 ///
 /// * Static items, one for each `<IDENT>`;
-/// * Type items, one for each `<TYPE>`, deriving traits `Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd`;
+/// * Type items, one for each `<TYPE>`, deriving traits [`Clone`], [`Copy`], [`Debug`](std::fmt::Debug), [`Eq`], [`Hash`](std::hash::Hash), [`Ord`], [`PartialEq`], [`PartialOrd`];
 /// * Mod items, one for each `__<IDENT:lower>` (for internal usage).
 ///
 /// The expression part looks like a sum of sources.
 /// This is where overwriting takes place. All variants are completely overwritten except for tables, which got merged recursively.
-/// Every `<SRC>` takes one of the following forms:
 ///
-/// * `r#"name = "Tom""#` - an inline literal config.
-/// * `include_config!("example_config.toml")` - a file inclusion. The path is resolved relative to the current file (similar to [`include_str!()`]).
-/// * `include_config_env!("$CARGO_MANIFEST_DIR/examples/example_config.toml")` - also a file inclusion, but environment variables of form `$ENV_VAR` are interpolated. Escape `$` with `$$`.
+/// Every `<SRC>` shall be a literal string, or a macro invocation expanding into a literal string.
+/// The full support of eager expansion is impossible without [`#[feature(proc_macro_expand)]`](https://github.com/rust-lang/rust/issues/90765).
+/// Therefore, only [`include_str!()`], [`concat!()`], [`env!()`] are supported. So the following are all valid sources:
 ///
-/// The support of environment variable interpolation is to aid any code analyzer to locate files,
-/// as environment variables like `$CARGO_MANIFEST_DIR` and `$OUT_DIR` resolve to absolute paths.
+/// * `r#"name = "Tom""#`
+/// * `include_str!("example_config.toml")`
+/// * `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/example_config.toml"))`
+///
+/// The support of environment variables is to aid any code analyzer to locate files,
+/// as environment variables like `CARGO_MANIFEST_DIR` and `OUT_DIR` resolve to absolute paths.
 /// This is mostly inspired by [include_dir](https://docs.rs/include_dir/latest/include_dir/) crate.
 pub use inline_config_macros::config;
 

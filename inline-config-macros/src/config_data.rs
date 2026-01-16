@@ -7,19 +7,19 @@ struct ConfigDataFieldAttrs {
     rename: Option<String>,
 }
 
-pub struct ConfigDataImpls {
+pub struct ConfigDataTokenItems {
     convert_from_impl: syn::ItemImpl,
     non_option_impl: syn::ItemImpl,
 }
 
-impl quote::ToTokens for ConfigDataImpls {
+impl quote::ToTokens for ConfigDataTokenItems {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         self.convert_from_impl.to_tokens(tokens);
         self.non_option_impl.to_tokens(tokens);
     }
 }
 
-pub fn config_data(input: syn::ItemStruct) -> ConfigDataImpls {
+pub fn config_data(input: syn::ItemStruct) -> syn::Result<ConfigDataTokenItems> {
     let ident = &input.ident;
     let generics_params: Vec<_> = input.generics.params.iter().collect();
     let where_predicates = input
@@ -27,30 +27,34 @@ pub fn config_data(input: syn::ItemStruct) -> ConfigDataImpls {
         .where_clause
         .as_ref()
         .map(|where_clause| &where_clause.predicates);
-    let (members, (key_tys, tys)): (Vec<_>, (Vec<_>, Vec<_>)) = match &input.fields {
-        syn::Fields::Unit => (Vec::new(), (Vec::new(), Vec::new())),
-        syn::Fields::Unnamed(fields_unnamed) => fields_unnamed
-            .unnamed
-            .iter()
-            .enumerate()
-            .map(|(index, field)| (syn::Member::from(index), (Key::index_ty(index), &field.ty)))
-            .unzip(),
-        syn::Fields::Named(fields_named) => fields_named
-            .named
-            .iter()
-            .map(|field| {
+    let mut members = Vec::new();
+    let mut key_tys = Vec::new();
+    let mut tys = Vec::new();
+    match &input.fields {
+        syn::Fields::Unit => {}
+        syn::Fields::Unnamed(fields_unnamed) => {
+            for (index, field) in fields_unnamed.unnamed.iter().enumerate() {
+                members.push(syn::Member::from(index));
+                key_tys.push(Key::index_ty(index));
+                tys.push(&field.ty);
+            }
+        }
+        syn::Fields::Named(fields_named) => {
+            for field in &fields_named.named {
                 let ident = field.ident.as_ref().unwrap().clone();
-                let attrs = ConfigDataFieldAttrs::from_field(field)
-                    .unwrap_or_else(|e| proc_macro_error::abort!(field, e));
+                let attrs = ConfigDataFieldAttrs::from_field(&field)
+                    .map_err(|e| syn::Error::new_spanned(field, e))?;
                 let name = attrs
                     .rename
                     .unwrap_or_else(|| syn::ext::IdentExt::unraw(&ident).to_string());
-                (syn::Member::from(ident), (Key::name_ty(&name), &field.ty))
-            })
-            .unzip(),
+                members.push(syn::Member::from(ident));
+                key_tys.push(Key::name_ty(&name));
+                tys.push(&field.ty);
+            }
+        }
     };
     let generic = syn::Ident::new("__inline_config__S", proc_macro2::Span::call_site());
-    ConfigDataImpls {
+    Ok(ConfigDataTokenItems {
         convert_from_impl: syn::parse_quote! {
             impl<#(#generics_params,)* #generic>
                 ::inline_config::__private::ConvertFrom<#generic>
@@ -81,5 +85,5 @@ pub fn config_data(input: syn::ItemStruct) -> ConfigDataImpls {
         non_option_impl: syn::parse_quote! {
             impl<#(#generics_params),*> ::inline_config::__private::NonOption for #ident<#(#generics_params),*> where #where_predicates {}
         },
-    }
+    })
 }

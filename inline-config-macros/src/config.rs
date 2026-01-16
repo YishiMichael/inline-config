@@ -1,94 +1,106 @@
 use crate::format::Format;
+use crate::lit_expand::Lit;
 use crate::path::Key;
 use crate::value::Value;
 
-pub struct ConfigItem<F> {
-    format: std::marker::PhantomData<F>,
-    ident: syn::Ident,
-    ty: syn::Ident,
-    value: Value,
-    #[allow(clippy::type_complexity)]
-    item_fn: Box<dyn Fn(&syn::Ident, &syn::Type, &syn::Expr) -> syn::Item>,
+pub struct ConfigTokenItems {
+    item: syn::Item,
+    item_mod: syn::ItemMod,
+    item_struct: syn::ItemStruct,
+    get_impl: syn::ItemImpl,
 }
 
-impl<F: Format> syn::parse::Parse for ConfigItem<F> {
-    fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
-        match input.parse()? {
-            syn::Item::Static(syn::ItemStatic {
-                attrs,
-                vis,
-                static_token,
-                mutability,
-                ident,
-                colon_token,
-                ty,
-                eq_token,
-                expr,
-                semi_token,
-            }) => Ok(Self {
-                format: std::marker::PhantomData,
-                ident,
-                ty: Self::ident_from_ty(&ty)?,
-                value: Self::value_from_expr(&expr)?,
-                item_fn: Box::new(move |ident, ty, expr| {
-                    syn::parse_quote! {
-                        #(#attrs)*
-                        #vis #static_token #mutability #ident #colon_token #ty #eq_token #expr #semi_token
-                    }
-                }),
-            }),
-            syn::Item::Const(syn::ItemConst {
-                attrs,
-                vis,
-                const_token,
-                ident,
-                generics,
-                colon_token,
-                ty,
-                eq_token,
-                expr,
-                semi_token,
-            }) => Ok(Self {
-                format: std::marker::PhantomData,
-                ident,
-                ty: Self::ident_from_ty(&ty)?,
-                value: Self::value_from_expr(&expr)?,
-                item_fn: Box::new(move |ident, ty, expr| {
-                    syn::parse_quote! {
-                        #(#attrs)*
-                        #vis #const_token #ident #generics #colon_token #ty #eq_token #expr #semi_token
-                    }
-                }),
-            }),
-            item => Err(syn::Error::new_spanned(
-                item,
-                "expected static or const item",
-            )),
-        }
+impl quote::ToTokens for ConfigTokenItems {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        self.item.to_tokens(tokens);
+        self.item_mod.to_tokens(tokens);
+        self.item_struct.to_tokens(tokens);
+        self.get_impl.to_tokens(tokens);
     }
 }
 
-impl<F: Format> quote::ToTokens for ConfigItem<F> {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        let Self {
-            format: _,
+pub fn config(input: syn::Ident, item: syn::Item) -> syn::Result<ConfigTokenItems> {
+    let format: Format = std::str::FromStr::from_str(&input.to_string())
+        .map_err(|e| syn::Error::new_spanned(input, e))?;
+    let (ident, ty, expr, item_fn) = match item {
+        syn::Item::Static(syn::ItemStatic {
+            attrs,
+            vis,
+            static_token,
+            mutability,
+            ident,
+            colon_token,
+            ty,
+            eq_token,
+            expr,
+            semi_token,
+        }) => (
             ident,
             ty,
-            value,
-            item_fn,
-        } = self;
-        let mod_ident = quote::format_ident!("__{}", ident.to_string().to_lowercase());
-        let item = item_fn(
+            expr,
+            Box::new(move |ident, ty, expr| {
+                syn::parse_quote! {
+                    #(#attrs)*
+                    #vis #static_token #mutability #ident #colon_token #ty #eq_token #expr #semi_token
+                }
+            }) as Box<dyn Fn(syn::Ident, syn::Type, syn::Expr) -> syn::Item>,
+        ),
+        syn::Item::Const(syn::ItemConst {
+            attrs,
+            vis,
+            const_token,
             ident,
-            &syn::parse_quote! { #ty },
-            &syn::parse_quote! { #ty(#mod_ident::expr()) },
-        );
-        let item_mod = ConfigReprMod::from_value(value).item_mod(&mod_ident);
-        let item_struct: syn::ItemStruct = syn::parse_quote! {
+            generics,
+            colon_token,
+            ty,
+            eq_token,
+            expr,
+            semi_token,
+        }) => (
+            ident,
+            ty,
+            expr,
+            Box::new(move |ident, ty, expr| {
+                syn::parse_quote! {
+                    #(#attrs)*
+                    #vis #const_token #ident #generics #colon_token #ty #eq_token #expr #semi_token
+                }
+            }) as Box<dyn Fn(syn::Ident, syn::Type, syn::Expr) -> syn::Item>,
+        ),
+        item => Err(syn::Error::new_spanned(
+            item,
+            "expected static or const item",
+        ))?,
+    };
+
+    fn value_from_expr(expr: &syn::Expr, format: &Format) -> syn::Result<Value> {
+        match expr {
+            syn::Expr::Binary(binary) => Ok(
+                value_from_expr(&binary.left, format)? + value_from_expr(&binary.right, format)?
+            ),
+            expr => format
+                .parse(&syn::parse2::<Lit>(quote::ToTokens::to_token_stream(expr))?.expand()?)
+                .map_err(|e| syn::Error::new_spanned(expr, e)),
+        }
+    }
+
+    // Ensures `ty` is identifier.
+    syn::parse2::<syn::Ident>(quote::ToTokens::to_token_stream(&ty))?;
+    let value = value_from_expr(&expr, &format)?;
+
+    let mod_ident = quote::format_ident!("__{}", ident.to_string().to_lowercase());
+    Ok(ConfigTokenItems {
+        item: item_fn(
+            ident,
+            syn::parse_quote! { #ty },
+            syn::parse_quote! { #ty(#mod_ident::expr()) },
+        ),
+        item_mod: ConfigReprMod::from_value(&value).item_mod(&mod_ident),
+        item_struct: syn::parse_quote! {
             #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
             pub struct #ty(pub #mod_ident::Type);
-        };
-        let item_impl: syn::ItemImpl = syn::parse_quote! {
+        },
+        get_impl: syn::parse_quote! {
             impl<P, T> ::inline_config::Get<P, T> for #ty
             where
                 #mod_ident::Type:
@@ -107,105 +119,177 @@ impl<F: Format> quote::ToTokens for ConfigItem<F> {
                     )
                 }
             }
-        };
-        item.to_tokens(tokens);
-        item_mod.to_tokens(tokens);
-        item_struct.to_tokens(tokens);
-        item_impl.to_tokens(tokens);
-    }
+        },
+    })
 }
 
-impl<F: Format> ConfigItem<F> {
-    fn ident_from_ty(ty: &syn::Type) -> syn::Result<syn::Ident> {
-        match ty {
-            syn::Type::Path(syn::TypePath { qself: None, path }) => path.require_ident().cloned(),
-            _ => Err(syn::Error::new_spanned(
-                ty,
-                "config type must be an identifier",
-            )),
-        }
-    }
+// fn lit_from_expr(expr: &syn::Expr) -> syn::Result<String> {
+//     match expr {
+//         syn::Expr::Lit(syn::ExprLit {
+//             attrs: _,
+//             lit: syn::Lit::Str(text_lit),
+//         }) => Ok(text_lit.value()),
 
-    fn value_from_expr(expr: &syn::Expr) -> syn::Result<Value> {
-        match expr {
-            syn::Expr::Lit(syn::ExprLit {
-                attrs: _,
-                lit: syn::Lit::Str(text_lit),
-            }) => F::parse(&text_lit.value()).map_err(|e| syn::Error::new_spanned(expr, e)),
+//         syn::Expr::Macro(syn::ExprMacro { attrs: _, mac }) => {
+//             let path_lit: syn::LitStr = syn::parse2(mac.tokens.clone())?;
+//             let path = match mac.path.require_ident()?.to_string().as_str() {
+//                 "include_str" => Ok(std::path::PathBuf::from(path_lit.value())),
+//                 "include_config_env" => Self::resolve_env(&path_lit.value())
+//                     .map(std::path::PathBuf::from)
+//                     .map_err(|e| syn::Error::new_spanned(&path_lit, e)),
+//                 _ => Err(syn::Error::new_spanned(&mac.path, "expected `include_str`")),
+//             }?;
 
-            syn::Expr::Macro(syn::ExprMacro { attrs: _, mac }) => {
-                let path_lit: syn::LitStr = syn::parse2(mac.tokens.clone())?;
-                let path = match mac.path.require_ident()?.to_string().as_str() {
-                    "include_config" => Ok(std::path::PathBuf::from(path_lit.value())),
-                    "include_config_env" => Self::resolve_env(&path_lit.value())
-                        .map(std::path::PathBuf::from)
-                        .map_err(|e| syn::Error::new_spanned(&path_lit, e)),
-                    _ => Err(syn::Error::new_spanned(
-                        &mac.path,
-                        "expected `include_config` or `include_config_env`",
-                    )),
-                }?;
+//             // Resolve the path relative to the current file.
+//             let path = if path.is_absolute() {
+//                 path
+//             } else {
+//                 // Rust analyzer hasn't implemented `Span::file()`.
+//                 // https://github.com/rust-lang/rust-analyzer/issues/15950
+//                 std::path::PathBuf::from(proc_macro2::Span::call_site().file())
+//                     .parent()
+//                     .ok_or(syn::Error::new_spanned(
+//                         &path_lit,
+//                         "cannot retrieve parent dir",
+//                     ))?
+//                     .join(path)
+//             };
 
-                // Resolve the path relative to the current file.
-                let path = if path.is_absolute() {
-                    path
-                } else {
-                    // Rust analyzer hasn't implemented `Span::file()`.
-                    // https://github.com/rust-lang/rust-analyzer/issues/15950
-                    std::path::PathBuf::from(proc_macro2::Span::call_site().file())
-                        .parent()
-                        .ok_or(syn::Error::new_spanned(
-                            &path_lit,
-                            "cannot retrieve parent dir",
-                        ))?
-                        .join(path)
-                };
+//             let text =
+//                 std::fs::read_to_string(path).map_err(|e| syn::Error::new_spanned(&path_lit, e))?;
+//             F::parse(&text).map_err(|e| syn::Error::new_spanned(expr, e))
+//         }
 
-                let text = std::fs::read_to_string(path)
-                    .map_err(|e| syn::Error::new_spanned(&path_lit, e))?;
-                F::parse(&text).map_err(|e| syn::Error::new_spanned(expr, e))
-            }
+//         _ => Err(syn::Error::new_spanned(
+//             expr,
+//             "expected string literal or macro invocation",
+//         )),
+//     }
+// }
 
-            syn::Expr::Binary(binary) => {
-                Ok(Self::value_from_expr(&binary.left)? + Self::value_from_expr(&binary.right)?)
-            }
+// pub struct ConfigItem<F> {
+//     format: std::marker::PhantomData<F>,
+//     ident: syn::Ident,
+//     ty: syn::Ident,
+//     value: Value,
+//     #[allow(clippy::type_complexity)]
+//     item_fn: Box<dyn Fn(&syn::Ident, &syn::Type, &syn::Expr) -> syn::Item>,
+// }
 
-            _ => Err(syn::Error::new_spanned(
-                expr,
-                "expected string literal or macro invocation",
-            )),
-        }
-    }
+// impl<F: Format> syn::parse::Parse for ConfigItem<F> {
+//     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
+//         match input.parse()? {
+//             syn::Item::Static(syn::ItemStatic {
+//                 attrs,
+//                 vis,
+//                 static_token,
+//                 mutability,
+//                 ident,
+//                 colon_token,
+//                 ty,
+//                 eq_token,
+//                 expr,
+//                 semi_token,
+//             }) => Ok(Self {
+//                 format: std::marker::PhantomData,
+//                 ident,
+//                 ty: Self::ident_from_ty(&ty)?,
+//                 value: Self::value_from_expr(&expr)?,
+//                 item_fn: Box::new(move |ident, ty, expr| {
+//                     syn::parse_quote! {
+//                         #(#attrs)*
+//                         #vis #static_token #mutability #ident #colon_token #ty #eq_token #expr #semi_token
+//                     }
+//                 }),
+//             }),
+//             syn::Item::Const(syn::ItemConst {
+//                 attrs,
+//                 vis,
+//                 const_token,
+//                 ident,
+//                 generics,
+//                 colon_token,
+//                 ty,
+//                 eq_token,
+//                 expr,
+//                 semi_token,
+//             }) => Ok(Self {
+//                 format: std::marker::PhantomData,
+//                 ident,
+//                 ty: Self::ident_from_ty(&ty)?,
+//                 value: Self::value_from_expr(&expr)?,
+//                 item_fn: Box::new(move |ident, ty, expr| {
+//                     syn::parse_quote! {
+//                         #(#attrs)*
+//                         #vis #const_token #ident #generics #colon_token #ty #eq_token #expr #semi_token
+//                     }
+//                 }),
+//             }),
+//             item => Err(syn::Error::new_spanned(
+//                 item,
+//                 "expected static or const item",
+//             )),
+//         }
+//     }
+// }
 
-    // Resolve `$ENV_VAR` in a given path.
-    // Inspired from `include_dir::resolve_env`.
-    fn resolve_env(path: &str) -> Result<String, std::env::VarError> {
-        let mut chars = path.chars().peekable();
-        let mut resolved = String::new();
-        while let Some(c) = chars.next() {
-            if c != '$' {
-                resolved.push(c);
-                continue;
-            }
-            if chars.peek() == Some(&'$') {
-                chars.next();
-                resolved.push('$');
-                continue;
-            }
-            let mut variable = String::new();
-            while let Some(&c) = chars.peek() {
-                if matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '_') {
-                    chars.next();
-                    variable.push(c);
-                } else {
-                    break;
-                }
-            }
-            resolved.push_str(&std::env::var(&variable)?);
-        }
-        Ok(resolved)
-    }
-}
+// impl<F: Format> quote::ToTokens for ConfigItem<F> {
+//     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+//         let Self {
+//             format: _,
+//             ident,
+//             ty,
+//             value,
+//             item_fn,
+//         } = self;
+
+//         item.to_tokens(tokens);
+//         item_mod.to_tokens(tokens);
+//         item_struct.to_tokens(tokens);
+//         item_impl.to_tokens(tokens);
+//     }
+// }
+
+// impl<F: Format> ConfigItem<F> {
+//     fn ident_from_ty(ty: &syn::Type) -> syn::Result<syn::Ident> {
+//         match ty {
+//             syn::Type::Path(syn::TypePath { qself: None, path }) => path.require_ident().cloned(),
+//             _ => Err(syn::Error::new_spanned(
+//                 ty,
+//                 "config type must be an identifier",
+//             )),
+//         }
+//     }
+
+//     // Resolve `$ENV_VAR` in a given path.
+//     // Inspired from `include_dir::resolve_env`.
+//     fn resolve_env(path: &str) -> Result<String, std::env::VarError> {
+//         let mut chars = path.chars().peekable();
+//         let mut resolved = String::new();
+//         while let Some(c) = chars.next() {
+//             if c != '$' {
+//                 resolved.push(c);
+//                 continue;
+//             }
+//             if chars.peek() == Some(&'$') {
+//                 chars.next();
+//                 resolved.push('$');
+//                 continue;
+//             }
+//             let mut variable = String::new();
+//             while let Some(&c) = chars.peek() {
+//                 if matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '_') {
+//                     chars.next();
+//                     variable.push(c);
+//                 } else {
+//                     break;
+//                 }
+//             }
+//             resolved.push_str(&std::env::var(&variable)?);
+//         }
+//         Ok(resolved)
+//     }
+// }
 
 struct ConfigReprMod {
     ty: syn::Type,

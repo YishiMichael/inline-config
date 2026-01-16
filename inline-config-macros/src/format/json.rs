@@ -2,13 +2,9 @@ use crate::value::Value;
 use serde_json as json;
 use std::error::Error;
 
-pub struct JsonFormat;
-
-impl super::Format for JsonFormat {
-    fn parse(s: &str) -> Result<Value, Box<dyn Error>> {
-        let value = json::from_str(s)?;
-        morph(value)
-    }
+pub(super) fn parse(s: &str) -> Result<Value, Box<dyn Error>> {
+    let value = json::from_str(s)?;
+    morph(value)
 }
 
 fn morph(value: json::Value) -> Result<Value, Box<dyn Error>> {
