@@ -31,21 +31,24 @@ In your source file, declare a static variable using [`config`](https://docs.rs/
 ```rust
 use inline_config::config;
 
-// Just looks like a typical static item declaration.
-// Apart from the static item, a type `MyConfig` will be generated as well.
+// The syntax mostly follows from type alias declaration, but generates a unit struct `MyConfig`.
+// When there are multiple sources, latter ones overwrite former ones.
 // Including a file from disk is also possible, see `examples/include.rs`.
-#[config(toml)]
-pub static MY_CONFIG: MyConfig = r#"
-    title = "TOML example"
+#[config]
+pub type MyConfig = toml!(
+    r#"
+        title = "TOML example"
 
-    [server]
-    owner = "Tom"
-    timeout = 2000
-    ports = [ 8000, 8001, 8002 ]
-"# + r#"
-    [server]
-    timeout = 5000
-"#;
+        [server]
+        owner = "Tom"
+        timeout = 2000
+        ports = [ 8000, 8001, 8002 ]
+    "#,
+    r#"
+        [server]
+        timeout = 5000
+    "#
+);
 ```
 
 Then, access the data inside using the [`Get`](https://docs.rs/inline-config/latest/inline_config/trait.Get.html) trait in combination with the [`path!()`](https://docs.rs/inline-config/latest/inline_config/macro.path.html) macro
@@ -54,22 +57,22 @@ Then, access the data inside using the [`Get`](https://docs.rs/inline-config/lat
 use inline_config::{Get, path};
 
 // Multiple types may be compatible. As a cost, type annotation is always required.
-let title: &str = MY_CONFIG.get(path!(title));
+let title: &str = MyConfig.get(path!(title));
 assert_eq!("TOML example", title);
-let title: String = MY_CONFIG.get(path!(title));
+let title: String = MyConfig.get(path!(title));
 assert_eq!("TOML example", title);
 
 // A deeper path.
-let owner: &str = MY_CONFIG.get(path!(server.owner));
+let owner: &str = MyConfig.get(path!(server.owner));
 assert_eq!("Tom", owner);
 
 // Any numerical types.
-let timeout: u32 = MY_CONFIG.get(path!(server.timeout));
+let timeout: u32 = MyConfig.get(path!(server.timeout));
 assert_eq!(5000, timeout);
-let timeout: f32 = MY_CONFIG.get(path!(server.timeout));
+let timeout: f32 = MyConfig.get(path!(server.timeout));
 
 // A homogeneous array can be accessed as `Vec<T>`.
-let ports: Vec<u64> = MY_CONFIG.get(path!(server.ports));
+let ports: Vec<u64> = MyConfig.get(path!(server.ports));
 assert_eq!([8000, 8001, 8002].to_vec(), ports);
 ```
 

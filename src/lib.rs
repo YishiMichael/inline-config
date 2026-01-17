@@ -2,44 +2,47 @@
 //!
 //! ## Example
 //!
-//! Below is a basic example illustrating how to declare a static config item and access data from it.
+//! Below is a basic example illustrating how to declare a config type and access data from it.
 //!
 //! ```
 //! use inline_config::{Get, config, path};
 //!
-//! // Just looks like a typical static item declaration.
-//! // Apart from the static item, a type `MyConfig` will be generated as well.
+//! // The syntax mostly follows from type alias declaration, but generates a unit struct `MyConfig`.
+//! // When there are multiple sources, latter ones overwrite former ones.
 //! // Including a file from disk is also possible, see `examples/include.rs`.
-//! #[config(toml)]
-//! pub static MY_CONFIG: MyConfig = r#"
-//!     title = "TOML example"
+//! #[config]
+//! pub type MyConfig = toml!(
+//!     r#"
+//!         title = "TOML example"
 //!
-//!     [server]
-//!     owner = "Tom"
-//!     timeout = 2000
-//!     ports = [ 8000, 8001, 8002 ]
-//! "# + r#"
-//!     [server]
-//!     timeout = 5000
-//! "#;
+//!         [server]
+//!         owner = "Tom"
+//!         timeout = 2000
+//!         ports = [ 8000, 8001, 8002 ]
+//!     "#,
+//!     r#"
+//!         [server]
+//!         timeout = 5000
+//!     "#
+//! );
 //!
 //! // Multiple types may be compatible. As a cost, type annotation is always required.
-//! let title: &str = MY_CONFIG.get(path!(title));
+//! let title: &str = MyConfig.get(path!(title));
 //! assert_eq!("TOML example", title);
-//! let title: String = MY_CONFIG.get(path!(title));
+//! let title: String = MyConfig.get(path!(title));
 //! assert_eq!("TOML example", title);
 //!
 //! // A deeper path.
-//! let owner: &str = MY_CONFIG.get(path!(server.owner));
+//! let owner: &str = MyConfig.get(path!(server.owner));
 //! assert_eq!("Tom", owner);
 //!
 //! // Any numerical types.
-//! let timeout: u32 = MY_CONFIG.get(path!(server.timeout));
+//! let timeout: u32 = MyConfig.get(path!(server.timeout));
 //! assert_eq!(5000, timeout);
-//! let timeout: f32 = MY_CONFIG.get(path!(server.timeout));
+//! let timeout: f32 = MyConfig.get(path!(server.timeout));
 //!
 //! // A homogeneous array can be accessed as `Vec<T>`.
-//! let ports: Vec<u64> = MY_CONFIG.get(path!(server.ports));
+//! let ports: Vec<u64> = MyConfig.get(path!(server.ports));
 //! assert_eq!([8000, 8001, 8002].to_vec(), ports);
 //! ```
 //!
@@ -47,24 +50,21 @@
 //!
 //! ## Compatible types
 //!
-//! Internally, data from config sources are parsed into one of the eight variants:
-//! nil, booleans, unsigned integers, signed integers, floats, strings, arrays, tables.
+//! Internally, data from config sources are parsed into one of the seven variants:
+//! booleans, unsigned integers, signed integers, floats, strings, arrays, tables.
 //! Each of them has a specific storage representation, and have different compatible types.
 //!
-//! | Representation variant | Storage | Compatible types |
-//! |---|---|---|
-//! | Nil | [`()`](unit) | (See [option types](#option-types)) |
-//! | Boolean | [`bool`] | [`bool`] |
-//! | Unsigned Integer | [`u64`] | [`i8`], [`i16`], [`i32`], [`i64`], [`i128`], [`isize`],<br>[`u8`], [`u16`], [`u32`], [`u64`], [`u128`], [`usize`],<br>[`f32`], [`f64`] |
-//! | Signed Integer | `i64` | [`i8`], [`i16`], [`i32`], [`i64`], [`i128`], [`isize`],<br>[`f32`], [`f64`] |
-//! | Float | [`OrderedFloat<f64>`](ordered_float::OrderedFloat)<sup>1</sup> | [`f32`], [`f64`] |
-//! | String | [`&'static str`](str) | [`&str`], [`String`] |
-//! | Array | Structs | [`Vec<T>`] if homogeneous,<br>User-defined structs with unnamed fields |
-//! | Table | Structs | [`std::collections::BTreeMap<&str, T>`] if homogeneous,<br>[`std::collections::BTreeMap<String, T>`] if homogeneous,<br>[`indexmap::IndexMap<&str, T>`] if homogeneous<sup>2</sup>,<br>[`indexmap::IndexMap<String, T>`] if homogeneous<sup>2</sup>,<br>User-defined structs with named fields |
+//! | Representation variant | Compatible types |
+//! |---|---|
+//! | Boolean | [`bool`] |
+//! | Unsigned Integer | [`i8`], [`i16`], [`i32`], [`i64`], [`i128`], [`isize`],<br>[`u8`], [`u16`], [`u32`], [`u64`], [`u128`], [`usize`],<br>[`f32`], [`f64`] |
+//! | Signed Integer [`i8`], [`i16`], [`i32`], [`i64`], [`i128`], [`isize`],<br>[`f32`], [`f64`] |
+//! | Float | [`f32`], [`f64`] |
+//! | String | [`&str`], [`String`] |
+//! | Array | [`Vec<T>`] if homogeneous,<br>User-defined structs with unnamed fields |
+//! | Table | [`std::collections::BTreeMap<&str, T>`] if homogeneous,<br>[`std::collections::BTreeMap<String, T>`] if homogeneous,<br>[`indexmap::IndexMap<&str, T>`] if homogeneous\*,<br>[`indexmap::IndexMap<String, T>`] if homogeneous\*,<br>User-defined structs with named fields |
 //!
-//! Footnotes:
-//! 1. [`f64`] does not implement [`Eq`], [`Ord`], [`Hash`](std::hash::Hash) traits, but [`ordered_float::OrderedFloat<f64>`] does.
-//! 2. Only available when enabling `indexmap` feature flag.
+//! \* Only available when enabling `indexmap` feature flag.
 //!
 //! ### Container types
 //!
@@ -79,19 +79,9 @@
 //! arrays can be accessed as [`Vec<T>`], and tables can be accessed as [`std::collections::BTreeMap<&str, T>`] or [`std::collections::BTreeMap<String, T>`],
 //! as long as the representation of children can be accessed as `T`.
 //! For containers, this type compatibility comes with a recursive sense.
-//! There's a relevant concept from functional programming, known as [transmogrifying](https://docs.rs/frunk/0.4.4/frunk/#transmogrifying).
+//! There's a relevant concept from functional programming, known as [transmogrifying].
 //!
-//! ### Option types
-//!
-//! Some of config formats support null value.
-//! We cannot directly store it as [`Option<T>`], as we are not able to tell what `T` is by looking at a literal null.
-//! The following behaviors are implemented.
-//!
-//! * When requesting [`Option<T>`] from null, return [`None`];
-//! * When requesting `T` from null, return `T::default()` if `T` implements [`Default`].
-//!
-//! For consistency, you can also request [`Option<T>`] from a non-null value as long as `T` can be accessed from it,
-//! and the result will be additionally wrapped by a [`Some`].
+//! [transmogrifying]: https://docs.rs/frunk/0.4.4/frunk/#transmogrifying
 //!
 //! ## Feature flags
 //!
@@ -103,46 +93,36 @@
 mod convert;
 mod key;
 
-/// Declares a static/const config item.
+/// Declares a config type.
 ///
-///
-/// A config item may either be a static/const item, in the form illustrated below:
+/// A config type is declared using the type alias syntax, in the form illustrated below:
 ///
 /// ```ignore
-/// #[config(<FORMAT>)]
-/// <VIS> static <IDENT>: <TYPE> = <SRC>;
+/// #[config]
+/// <VIS> type <TYPE> = <FORMAT>!(<SRC>);
 ///
 /// #[config(<FORMAT>)]
-/// <VIS> static <IDENT>: <TYPE> = <SRC> + <SRC> + <SRC>;
-///
-/// #[config(<FORMAT>)]
-/// <VIS> const <IDENT>: <TYPE> = <SRC>;
-///
-/// #[config(<FORMAT>)]
-/// <VIS> const <IDENT>: <TYPE> = <SRC> + <SRC> + <SRC>;
+/// <VIS> type <TYPE> = <FORMAT>!(<SRC>, <SRC>, <SRC>);
 /// ```
 ///
-/// Each declaration is simply a typical static/const item with a new type to be generated.
-/// `<IDENT>`s shall not collide; `<TYPE>`s shall not collide.
-/// After expansion the following symbols are brought into scope:
+/// The `<TYPE>` shall be a new identifier (not already defined).
+/// After expansion, for each `<TYPE>` the following symbols are brought into scope:
 ///
-/// * Static items, one for each `<IDENT>`;
-/// * Type items, one for each `<TYPE>`, deriving traits [`Clone`], [`Copy`], [`Debug`](std::fmt::Debug), [`Eq`], [`Hash`](std::hash::Hash), [`Ord`], [`PartialEq`], [`PartialOrd`];
-/// * Mod items, one for each `__<IDENT:lower>` (for internal usage).
+/// * A unit struct `<TYPE>`;
+/// * A module `__<TYPE>` for internal usage.
 ///
-/// The expression part looks like a sum of sources.
-/// This is where overwriting takes place. All variants are completely overwritten except for tables, which got merged recursively.
+/// When there are multiple sources, they got merged recursively per field, with latter ones overwriting former ones.
+/// All null values need to be overwritten eventually.
 ///
 /// Every `<SRC>` shall be a literal string, or a macro invocation expanding into a literal string.
-/// The full support of eager expansion is impossible without [`#[feature(proc_macro_expand)]`](https://github.com/rust-lang/rust/issues/90765).
+/// The full support of eager expansion is impossible without nightly-only feature [`proc_macro_expand`].
 /// A subset of eager expansion for built-in macros is handled by [`macro_string`] crate, which identifies both the following as valid sources:
 ///
 /// * `r#"name = "Tom""#`
 /// * `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/example_config.toml"))`
 ///
-/// The support of environment variables is to aid any code analyzer to locate files,
-/// as environment variables like `CARGO_MANIFEST_DIR` and `OUT_DIR` resolve to absolute paths.
-/// This is mostly inspired by [include_dir](https://docs.rs/include_dir/latest/include_dir/) crate.
+/// [`proc_macro_expand`]: https://github.com/rust-lang/rust/issues/90765
+/// [`macro_string`]: https://docs.rs/macro-string/latest/macro_string/
 pub use inline_config_macros::config;
 
 /// Constructs a path with which one accesses a nested-in piece of data from config.
@@ -180,7 +160,7 @@ pub use inline_config_macros::ConfigData;
 ///
 /// A type bound `C: Get<P, T>` means the data at path `P` from config `C` is compatible with and can be converted into `T`.
 ///
-/// This trait is not meant to be custom implemented; all implementations are induced from `config!()` macro.
+/// This trait is not meant to be custom implemented; all implementations are induced from [`config`] macro.
 pub trait Get<P, T> {
     fn get(&self, path: P) -> T;
 }

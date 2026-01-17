@@ -1,4 +1,4 @@
-use inline_config::{ConfigData, Get, Path, config, path};
+use inline_config::{config, path, ConfigData, Get, Path};
 
 /// Edited from TOML official example.
 #[config]
@@ -50,10 +50,10 @@ fn primitive_types() {
     println!("{title}");
 
     // Incompatible types will cause compile error.
-    // let title: u32 = MY_CONFIG.get(path!(title));
+    // let title: u32 = TomlExample.get(path!(title));
 
     // Missing keys will cause compile error.
-    // let _: u32 = MY_CONFIG.get(path!(unknown));
+    // let _: u32 = TomlExample.get(path!(unknown));
 
     // Nested paths chained by `.`.
     let owner_name: &str = TomlExample.get(path!(owner.name));
