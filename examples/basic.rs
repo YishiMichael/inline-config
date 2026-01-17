@@ -1,4 +1,4 @@
-use inline_config::{config, path, ConfigData, Get, Path};
+use inline_config::{ConfigData, Get, Path, config, path};
 
 /// Edited from TOML official example.
 #[config]
