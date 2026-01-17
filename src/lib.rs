@@ -58,7 +58,7 @@
 //! |---|---|
 //! | Boolean | [`bool`] |
 //! | Unsigned Integer | [`i8`], [`i16`], [`i32`], [`i64`], [`i128`], [`isize`],<br>[`u8`], [`u16`], [`u32`], [`u64`], [`u128`], [`usize`],<br>[`f32`], [`f64`] |
-//! | Signed Integer [`i8`], [`i16`], [`i32`], [`i64`], [`i128`], [`isize`],<br>[`f32`], [`f64`] |
+//! | Signed Integer | [`i8`], [`i16`], [`i32`], [`i64`], [`i128`], [`isize`],<br>[`f32`], [`f64`] |
 //! | Float | [`f32`], [`f64`] |
 //! | String | [`&str`], [`String`] |
 //! | Array | [`Vec<T>`] if homogeneous,<br>User-defined structs with unnamed fields |
