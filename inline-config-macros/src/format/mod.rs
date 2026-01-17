@@ -2,13 +2,13 @@ use crate::value::Value;
 use std::error::Error;
 
 #[cfg(feature = "json")]
-mod json;
+pub mod json;
 
 #[cfg(feature = "toml")]
-mod toml;
+pub mod toml;
 
 #[cfg(feature = "yaml")]
-mod yaml;
+pub mod yaml;
 
 pub enum Format {
     #[cfg(feature = "json")]
@@ -22,6 +22,21 @@ pub enum Format {
 }
 
 impl Format {
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            #[cfg(feature = "json")]
+            "json" => Some(Self::Json),
+
+            #[cfg(feature = "toml")]
+            "toml" => Some(Self::Toml),
+
+            #[cfg(feature = "yaml")]
+            "yaml" => Some(Self::Yaml),
+
+            _ => None,
+        }
+    }
+
     pub fn parse(&self, s: &str) -> Result<Value, Box<dyn Error>> {
         match self {
             #[cfg(feature = "json")]
@@ -33,32 +48,5 @@ impl Format {
             #[cfg(feature = "yaml")]
             Self::Yaml => yaml::parse(s),
         }
-    }
-}
-
-impl std::str::FromStr for Format {
-    type Err = FormatError;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s {
-            #[cfg(feature = "json")]
-            "json" => Ok(Self::Json),
-
-            #[cfg(feature = "toml")]
-            "toml" => Ok(Self::Toml),
-
-            #[cfg(feature = "yaml")]
-            "yaml" => Ok(Self::Yaml),
-
-            _ => Err(FormatError),
-        }
-    }
-}
-
-pub struct FormatError;
-
-impl std::fmt::Display for FormatError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("unsupported format")
     }
 }

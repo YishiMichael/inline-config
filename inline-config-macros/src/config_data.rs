@@ -7,26 +7,15 @@ struct ConfigDataFieldAttrs {
     rename: Option<String>,
 }
 
-pub struct ConfigDataTokenItems {
-    convert_from_impl: syn::ItemImpl,
-    non_option_impl: syn::ItemImpl,
-}
-
-impl quote::ToTokens for ConfigDataTokenItems {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        self.convert_from_impl.to_tokens(tokens);
-        self.non_option_impl.to_tokens(tokens);
-    }
-}
-
-pub fn config_data(input: syn::ItemStruct) -> syn::Result<ConfigDataTokenItems> {
+pub fn config_data(input: syn::ItemStruct) -> syn::Result<syn::ItemImpl> {
     let ident = &input.ident;
     let generics_params: Vec<_> = input.generics.params.iter().collect();
-    let where_predicates = input
+    let where_predicates: Vec<_> = input
         .generics
         .where_clause
         .as_ref()
-        .map(|where_clause| &where_clause.predicates);
+        .map(|where_clause| where_clause.predicates.iter().collect())
+        .unwrap_or_default();
     let mut members = Vec::new();
     let mut key_tys = Vec::new();
     let mut tys = Vec::new();
@@ -42,7 +31,7 @@ pub fn config_data(input: syn::ItemStruct) -> syn::Result<ConfigDataTokenItems> 
         syn::Fields::Named(fields_named) => {
             for field in &fields_named.named {
                 let ident = field.ident.as_ref().unwrap().clone();
-                let attrs = ConfigDataFieldAttrs::from_field(&field)
+                let attrs = ConfigDataFieldAttrs::from_field(field)
                     .map_err(|e| syn::Error::new_spanned(field, e))?;
                 let name = attrs
                     .rename
@@ -53,37 +42,21 @@ pub fn config_data(input: syn::ItemStruct) -> syn::Result<ConfigDataTokenItems> 
             }
         }
     };
-    let generic = syn::Ident::new("__inline_config__S", proc_macro2::Span::call_site());
-    Ok(ConfigDataTokenItems {
-        convert_from_impl: syn::parse_quote! {
-            impl<#(#generics_params,)* #generic>
-                ::inline_config::__private::ConvertFrom<#generic>
-            for
-                #ident<#(#generics_params),*>
-            where
-                #(
-                    #generic: ::inline_config::__private::Access<#key_tys>,
-                    <#generic as ::inline_config::__private::Access<#key_tys>>::Repr: ::inline_config::__private::ConvertRepr<#tys>,
-                )*
-                #where_predicates
-            {
-                fn convert_from(repr: &'static #generic) -> Self {
-                    #ident {
-                        #(#members:
-                            <
-                                <#generic as ::inline_config::__private::Access<#key_tys>>::Repr as ::inline_config::__private::ConvertRepr<#tys>
-                            >::convert_repr(
-                                <#generic as ::inline_config::__private::Access<#key_tys>>::access(
-                                    &repr,
-                                ),
-                            ),
-                        )*
-                    }
+    let generic = syn::Ident::new("__inline_config__R", proc_macro2::Span::call_site());
+    Ok(syn::parse_quote! {
+        impl<#(#generics_params,)* #generic> ::inline_config::__private::ConvertData<#generic> for #ident<#(#generics_params),*>
+        where
+            #(
+                #generic: ::inline_config::__private::AccessKey<#key_tys>,
+                <#generic as ::inline_config::__private::AccessKey<#key_tys>>::Repr: ::inline_config::__private::Convert<#tys>,
+            )*
+            #(#where_predicates)*
+        {
+            fn convert_data() -> Self {
+                #ident {
+                    #(#members: <<#generic as ::inline_config::__private::AccessKey<#key_tys>>::Repr as ::inline_config::__private::Convert<#tys>>::convert(),)*
                 }
             }
-        },
-        non_option_impl: syn::parse_quote! {
-            impl<#(#generics_params),*> ::inline_config::__private::NonOption for #ident<#(#generics_params),*> where #where_predicates {}
-        },
+        }
     })
 }

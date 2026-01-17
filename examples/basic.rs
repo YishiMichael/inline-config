@@ -1,9 +1,9 @@
 use inline_config::{ConfigData, Get, Path, config, path};
 
-#[config(toml)]
 /// Edited from TOML official example.
-/// This defines a type `TomlExample` and a static variable `TOML_EXAMPLE`.
-pub static TOML_EXAMPLE: TomlExample = r#"
+#[config]
+pub type TomlExample = toml!(
+    r#"
     title = "TOML Example"
 
     [owner]
@@ -37,15 +37,16 @@ pub static TOML_EXAMPLE: TomlExample = r#"
     json = 2001
     yaml = 2001
     toml = 2013
-"#;
+"#
+);
 
 fn primitive_types() {
     // Get a string at field `title`.
-    let title: String = TOML_EXAMPLE.get(path!(title));
+    let title: String = TomlExample.get(path!(title));
     println!("{title}");
 
     // String references are also compatible.
-    let title: &'static str = TOML_EXAMPLE.get(path!(title));
+    let title: &'static str = TomlExample.get(path!(title));
     println!("{title}");
 
     // Incompatible types will cause compile error.
@@ -55,34 +56,34 @@ fn primitive_types() {
     // let _: u32 = MY_CONFIG.get(path!(unknown));
 
     // Nested paths chained by `.`.
-    let owner_name: &str = TOML_EXAMPLE.get(path!(owner.name));
+    let owner_name: &str = TomlExample.get(path!(owner.name));
     println!("{owner_name}");
-    let server: &str = TOML_EXAMPLE.get(path!(database.server));
+    let server: &str = TomlExample.get(path!(database.server));
     println!("{server}");
 
     // Non-identifier key can be wrapped in quotes.
-    let date_of_birth: &str = TOML_EXAMPLE.get(path!(owner."date-of-birth"));
+    let date_of_birth: &str = TomlExample.get(path!(owner."date-of-birth"));
     println!("{date_of_birth}");
 
     // Any numeric types are compatible for numbers.
-    let connection_max: u32 = TOML_EXAMPLE.get(path!(database.connection_max));
+    let connection_max: u32 = TomlExample.get(path!(database.connection_max));
     println!("{connection_max}");
-    let connection_max: u64 = TOML_EXAMPLE.get(path!(database.connection_max));
+    let connection_max: u64 = TomlExample.get(path!(database.connection_max));
     println!("{connection_max}");
 
     // Index into an array using `.0`.
-    let port: u32 = TOML_EXAMPLE.get(path!(database.ports.0));
+    let port: u32 = TomlExample.get(path!(database.ports.0));
     println!("{port}");
 }
 
 fn container_types() {
     // Collect all items from a homogeneous array into a `Vec`.
-    let ports: Vec<u32> = TOML_EXAMPLE.get(path!(database.ports));
+    let ports: Vec<u32> = TomlExample.get(path!(database.ports));
     println!("{ports:?}");
 
     // Collect all items from a homogeneous table into a `BTreeMap`.
     // See `order.rs` if the order of entries needs to be preserved.
-    let languages: std::collections::BTreeMap<&str, u32> = TOML_EXAMPLE.get(path!(languages));
+    let languages: std::collections::BTreeMap<&str, u32> = TomlExample.get(path!(languages));
     println!("{languages:?}");
 }
 
@@ -97,11 +98,11 @@ fn user_types() {
         dc: String,
     }
 
-    let server: Server = TOML_EXAMPLE.get(path!(servers.alpha));
+    let server: Server = TomlExample.get(path!(servers.alpha));
     println!("{server:?}");
 
     // We can even compose with other containers!
-    let servers: std::collections::BTreeMap<String, Server> = TOML_EXAMPLE.get(path!(servers));
+    let servers: std::collections::BTreeMap<String, Server> = TomlExample.get(path!(servers));
     println!("{servers:?}");
 
     // Fields do not need to fully match. We only require all keys show up in the source data.
@@ -110,7 +111,7 @@ fn user_types() {
     struct PartialServer<'a> {
         ip: &'a str,
     }
-    let partial_server: PartialServer<'_> = TOML_EXAMPLE.get(path!(servers.alpha));
+    let partial_server: PartialServer<'_> = TomlExample.get(path!(servers.alpha));
     println!("{partial_server:?}");
 
     // Field renaming supported. Needed if the key is not a valid rust identifier.
@@ -121,7 +122,7 @@ fn user_types() {
         date_of_birth: S, // matches "date-of-birth"
         r#mod: S, // matches "mod"
     }
-    let owner: Owner<String> = TOML_EXAMPLE.get(path!(owner));
+    let owner: Owner<String> = TomlExample.get(path!(owner));
     println!("{owner:?}");
 
     // Nesting supported.
@@ -131,113 +132,85 @@ fn user_types() {
         owner: Owner<String>,
     }
     // An empty path fetches data at the root.
-    let root: Root = TOML_EXAMPLE.get(path!());
+    let root: Root = TomlExample.get(path!());
     println!("{root:?}");
 
     // Unnamed structs corresponds to arrays.
     #[derive(ConfigData, Debug)]
     struct Hosts(String, String);
-    let hosts: Hosts = TOML_EXAMPLE.get(path!(clients.hosts));
+    let hosts: Hosts = TomlExample.get(path!(clients.hosts));
     println!("{hosts:?}");
 }
 
-fn optional_types() {
-    // Note, some formats like toml do not have null types.
-    #[config(json)]
-    static JSON_CONFIG: JsonConfig = r#"
-    {
-        "name": "Tom Preston-Werner",
-        "preferred-name": null,
-        "servers": null
-    }
-    "#;
-
-    // Any non-null `T` can be converted into `Some(T)` for free.
-    let name: String = JSON_CONFIG.get(path!(name));
-    println!("{name}");
-
-    // `null` can be converted into `None` as any `Option<T>`.
-    let preferred_name: Option<&str> = JSON_CONFIG.get(path!("preferred-name"));
-    println!("{preferred_name:?}");
-
-    // `null` can be converted into `T` if it implements `Default`.
-    let servers_fallback: u32 = JSON_CONFIG.get(path!("servers"));
-    println!("{servers_fallback}");
-}
-
 fn overwrite() {
-    // Use `+` to chain multiple config sources. The latter overwrites the former.
-    #[config(json)]
-    static CHAINED_CONFIG: ChainedConfig = r#"
-    {
-        "name": "Tom Preston-Werner",
-        "preferred-name": null
-    }
-    "# + r#"
-    {
-        "preferred-name": "Tom",
-        "year-of-birth": 1979
-    }
-    "#;
+    // Some formats like json have null types. They need to be resolved.
+    // Use commas to split multiple sources. The latter overwrites the former.
+    #[config]
+    type ChainedConfig = json!(
+        r#"
+        {
+            "name": "Tom Preston-Werner",
+            "preferred-name": null
+        }
+        "#,
+        r#"
+        {
+            "preferred-name": "Tom",
+            "year-of-birth": 1979
+        }
+        "#
+    );
 
     // `preferred-name` is overwritten by the latter config source.
-    let preferred_name: Option<&str> = CHAINED_CONFIG.get(path!("preferred-name"));
+    let preferred_name: &str = ChainedConfig.get(path!("preferred-name"));
     println!("{preferred_name:?}");
 
     // `year-of-birth` is newly added by the latter config source.
-    let year_of_birth: u32 = CHAINED_CONFIG.get(path!("year-of-birth"));
+    let year_of_birth: u32 = ChainedConfig.get(path!("year-of-birth"));
     println!("{year_of_birth}");
 }
 
 fn get_trait() {
-    #[config(json)]
-    static PRIMARY_CONFIG: PrimaryConfig = r#"
-    {
-        "name": "Tom Preston-Werner",
-        "preferred-name": null
-    }
-    "#;
+    #[config]
+    type PrimaryConfig = json!(
+        r#"
+        {
+            "name": "Tom Preston-Werner",
+            "preferred-name": ""
+        }
+        "#
+    );
 
-    #[config(json)]
-    static CHAINED_CONFIG: ChainedConfig = r#"
-    {
-        "name": "Tom Preston-Werner",
-        "preferred-name": null
-    }
-    "# + r#"
-    {
-        "preferred-name": "Tom",
-        "year-of-birth": 1979
-    }
-    "#;
+    #[config]
+    type ChainedConfig = json!(
+        r#"
+        {
+            "name": "Tom Preston-Werner",
+            "preferred-name": null
+        }
+        "#,
+        r#"
+        {
+            "preferred-name": "Tom",
+            "year-of-birth": 1979
+        }
+        "#
+    );
 
     // After overwriting, the two configs have different types.
     // The `Get` trait modeled their shared data-getting behavior.
-    fn get_names<C>(config: &'static C) -> (String, Option<String>)
+    fn get_names<C>(config: &C) -> (String, String)
     where
         C: Get<Path!(name), String>,
-        C: Get<Path!("preferred-name"), Option<String>>,
+        C: Get<Path!("preferred-name"), String>,
     {
         (config.get(path!(name)), config.get(path!("preferred-name")))
     }
 
-    let names = get_names(&PRIMARY_CONFIG);
+    let names = get_names(&PrimaryConfig);
     println!("{names:?}");
-    let names = get_names(&CHAINED_CONFIG);
+    let names = get_names(&ChainedConfig);
     println!("{names:?}");
-}
-
-fn implemented_traits() {
-    // The generated types will always have the following basic traits implemented.
-    fn f<
-        C: Clone + Copy + Eq + Ord + PartialEq + PartialOrd + std::fmt::Debug + std::hash::Hash,
-    >(
-        _config: C,
-    ) {
-    }
-
-    f(TOML_EXAMPLE);
-    println!("{:?}", TOML_EXAMPLE);
 }
 
 fn main() {
@@ -247,12 +220,8 @@ fn main() {
     container_types();
     println!("\n* user_types\n");
     user_types();
-    println!("\n* optional_types\n");
-    optional_types();
     println!("\n* overwrite\n");
     overwrite();
     println!("\n* get_trait\n");
     get_trait();
-    println!("\n* implemented_traits\n");
-    implemented_traits();
 }

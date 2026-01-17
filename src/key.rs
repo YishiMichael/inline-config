@@ -1,4 +1,3 @@
-use crate::repr::ReprContainer;
 use std::marker::PhantomData;
 
 // Borrowed from `frunk_core::labelled::chars`.
@@ -44,51 +43,22 @@ pub struct PathNil;
 #[derive(Default)]
 pub struct PathCons<K, KS>(K, KS);
 
-pub trait Access<K> {
-    type Repr: 'static;
-
-    fn access(&'static self) -> &'static Self::Repr;
-}
-
 pub trait AccessKey<K> {
-    type Repr: 'static;
-
-    fn access_key(&'static self) -> &'static Self::Repr;
+    type Repr;
 }
 
 pub trait AccessPath<P> {
-    type Repr: 'static;
-
-    fn access_path(&'static self) -> &'static Self::Repr;
+    type Repr;
 }
 
-impl<S, K> AccessKey<K> for ReprContainer<S>
-where
-    S: Access<K>,
-{
-    type Repr = S::Repr;
-
-    fn access_key(&'static self) -> &'static Self::Repr {
-        self.access()
-    }
-}
-
-impl<R: 'static> AccessPath<PathNil> for R {
+impl<R> AccessPath<PathNil> for R {
     type Repr = R;
-
-    fn access_path(&self) -> &Self::Repr {
-        self
-    }
 }
 
 impl<R, K, KS> AccessPath<PathCons<K, KS>> for R
 where
     R: AccessKey<K>,
-    R::Repr: AccessPath<KS>,
+    <R as AccessKey<K>>::Repr: AccessPath<KS>,
 {
-    type Repr = <R::Repr as AccessPath<KS>>::Repr;
-
-    fn access_path(&'static self) -> &'static Self::Repr {
-        self.access_key().access_path()
-    }
+    type Repr = <<R as AccessKey<K>>::Repr as AccessPath<KS>>::Repr;
 }

@@ -2,7 +2,7 @@ use crate::value::Value;
 use serde_json as json;
 use std::error::Error;
 
-pub(super) fn parse(s: &str) -> Result<Value, Box<dyn Error>> {
+pub fn parse(s: &str) -> Result<Value, Box<dyn Error>> {
     let value = json::from_str(s)?;
     morph(value)
 }

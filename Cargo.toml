@@ -40,9 +40,6 @@ yaml = ["inline-config-macros/yaml"]
 version = "0.2.0"
 path = "inline-config-macros"
 
-[dependencies.ordered-float]
-version = "5.1.0"
-
 [dependencies.indexmap]
 version = "2.12.1"
 optional = true

@@ -102,7 +102,6 @@
 
 mod convert;
 mod key;
-mod repr;
 
 /// Declares a static/const config item.
 ///
@@ -183,17 +182,11 @@ pub use inline_config_macros::ConfigData;
 ///
 /// This trait is not meant to be custom implemented; all implementations are induced from `config!()` macro.
 pub trait Get<P, T> {
-    fn get(&'static self, path: P) -> T;
+    fn get(&self, path: P) -> T;
 }
 
 #[doc(hidden)]
 pub mod __private {
     pub use crate::convert::*;
     pub use crate::key::*;
-    pub use crate::repr::*;
-
-    pub use ordered_float::OrderedFloat;
-
-    #[cfg(feature = "indexmap")]
-    pub use indexmap::IndexMap;
 }
