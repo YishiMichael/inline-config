@@ -405,12 +405,12 @@ mod expand_mod {
         },
         #[cfg(feature = "indexmap")]
         ContainerConvertItem {
-            ty_fn: |generic| syn::parse_quote! { indexmap::IndexMap<&'static str, #generic> },
+            ty_fn: |generic| syn::parse_quote! { ::indexmap::IndexMap<&'static str, #generic> },
             expr_fn: |tags, exprs| syn::parse_quote! { [#((#tags, #exprs)),*].into() },
         },
         #[cfg(feature = "indexmap")]
         ContainerConvertItem {
-            ty_fn: |generic| syn::parse_quote! { indexmap::IndexMap<String, #generic> },
+            ty_fn: |generic| syn::parse_quote! { ::indexmap::IndexMap<String, #generic> },
             expr_fn: |tags, exprs| syn::parse_quote! { [#((#tags.to_string(), #exprs)),*].into() },
         },
     ];
