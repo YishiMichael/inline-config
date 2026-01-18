@@ -36,8 +36,8 @@ impl syn::parse::Parse for Key {
 }
 
 impl Path {
-    pub fn ty(self) -> syn::Result<syn::Type> {
-        Ok(self.0.iter().rfold(
+    pub fn ty(self) -> syn::Type {
+        self.0.iter().rfold(
             syn::parse_quote! {
                 ::inline_config::__private::PathNil
             },
@@ -50,14 +50,14 @@ impl Path {
                     ::inline_config::__private::PathCons<#head_ty, #tail_ty>
                 }
             },
-        ))
+        )
     }
 
-    pub fn expr(self) -> syn::Result<syn::Expr> {
-        let ty = self.ty()?;
-        Ok(syn::parse_quote! {
+    pub fn expr(self) -> syn::Expr {
+        let ty = self.ty();
+        syn::parse_quote! {
             <#ty>::default()
-        })
+        }
     }
 }
 

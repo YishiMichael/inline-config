@@ -1,74 +1,95 @@
 use crate::format::Format;
+use darling::FromMeta;
+
+#[derive(FromMeta)]
+#[darling(derive_syn_parse)]
+pub struct ConfigArgs {
+    #[darling(default)]
+    export: ExportSettings,
+}
+
+#[derive(Default, FromMeta)]
+struct ExportSettings {
+    #[darling(rename = "type")]
+    r#type: Option<syn::Ident>,
+    #[darling(rename = "const")]
+    r#const: Option<syn::Ident>,
+    #[darling(rename = "static")]
+    r#static: Option<syn::Ident>,
+}
 
 pub struct ConfigTokenItems {
     item_mod: syn::ItemMod,
-    item_struct: syn::ItemStruct,
-    get_impl: syn::ItemImpl,
+    export_item_type: Option<syn::ItemType>,
+    export_item_const: Option<syn::ItemConst>,
+    export_item_static: Option<syn::ItemStatic>,
 }
 
 impl quote::ToTokens for ConfigTokenItems {
     fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
         self.item_mod.to_tokens(tokens);
-        self.item_struct.to_tokens(tokens);
-        self.get_impl.to_tokens(tokens);
+        self.export_item_type.to_tokens(tokens);
+        self.export_item_const.to_tokens(tokens);
+        self.export_item_static.to_tokens(tokens);
     }
 }
 
-pub fn config(item: syn::ItemType) -> syn::Result<ConfigTokenItems> {
-    let syn::ItemType {
+pub fn config(args: ConfigArgs, item: syn::ItemMod) -> syn::Result<ConfigTokenItems> {
+    let syn::ItemMod {
         attrs,
         vis,
         ident,
-        ty,
+        content,
         ..
     } = item;
-    let mac = match *ty {
-        syn::Type::Macro(syn::TypeMacro { mac }) => Ok(mac),
-        ty => Err(syn::Error::new_spanned(&ty, "expecting macro")),
-    }?;
-    let format = Format::from_str(&mac.path.require_ident()?.to_string())
-        .ok_or(syn::Error::new_spanned(&mac.path, "format not supported"))?;
-    let sources = syn::parse::Parser::parse2(
-        syn::punctuated::Punctuated::<macro_string::MacroString, syn::Token![,]>::parse_terminated,
-        mac.tokens,
-    )?;
-    let value = sources
-        .iter()
+    let (brace, items) = content.ok_or(syn::Error::new_spanned(&ident, "no sources found"))?;
+    if items.is_empty() {
+        return Err(syn::Error::new(
+            syn::spanned::Spanned::span(&brace.span),
+            "no sources found",
+        ));
+    }
+    let value = items
+        .into_iter()
+        .map(|item| match item {
+            syn::Item::Macro(syn::ItemMacro { mac, .. }) => Ok(mac),
+            item => Err(syn::Error::new_spanned(&item, "expecting macro")),
+        })
         .enumerate()
-        .map(|(index, source)| {
-            // Waiting for `macro_string::MacroString` to implement `Spanned`.
-            // https://github.com/dtolnay/macro-string/issues/25
+        .map(|(index, mac)| {
+            let syn::Macro { path, tokens, .. } = mac?;
+            let format = Format::from_str(&path.require_ident()?.to_string())
+                .ok_or(syn::Error::new_spanned(&path, "format not supported"))?;
+            let source: macro_string::MacroString = syn::parse2(tokens)?;
             format.parse(&source.0).map_err(|e| {
                 syn::Error::new(proc_macro2::Span::call_site(), format!("src {index}: {e}"))
             })
         })
-        .collect::<syn::Result<Vec<_>>>()?
-        .into_iter()
-        .sum();
+        .sum::<syn::Result<_>>()?;
 
-    let (item_mod, ty) =
-        expand_mod::mod_ty_from_value(value, quote::format_ident!("__{}", ident.to_string()))
-            .map_err(|expand_mod::NilError| {
-                syn::Error::new(proc_macro2::Span::call_site(), "unresolved nil")
-            })?;
-
+    let expand_mod::ModStructure { ty, expr, item_mod } =
+        expand_mod::ModStructure::from_value(ident, value);
     Ok(ConfigTokenItems {
-        item_mod,
-        item_struct: syn::parse_quote! {
-            #(#attrs)*
-            #vis struct #ident;
+        item_mod: syn::ItemMod {
+            attrs,
+            vis,
+            ..item_mod
         },
-        get_impl: syn::parse_quote! {
-            impl<P, T> ::inline_config::Get<P, T> for #ident
-            where
-                #ty: ::inline_config::__private::AccessPath<P>,
-                <#ty as ::inline_config::__private::AccessPath<P>>::Repr: ::inline_config::__private::Convert<T>,
-            {
-                fn get(&self, _path: P) -> T {
-                    <<#ty as ::inline_config::__private::AccessPath<P>>::Repr as ::inline_config::__private::Convert<T>>::convert()
-                }
+        export_item_type: args.export.r#type.map(|ident| {
+            syn::parse_quote! {
+                pub type #ident = #ty;
             }
-        },
+        }),
+        export_item_const: args.export.r#const.map(|ident| {
+            syn::parse_quote! {
+                pub const #ident: #ty = #expr;
+            }
+        }),
+        export_item_static: args.export.r#static.map(|ident| {
+            syn::parse_quote! {
+                pub static #ident: #ty = #expr;
+            }
+        }),
     })
 }
 
@@ -76,188 +97,227 @@ mod expand_mod {
     use crate::path::Key;
     use crate::value::Value;
 
-    pub fn mod_ty_from_value(
-        value: Value,
-        mod_ident: syn::Ident,
-    ) -> Result<(syn::ItemMod, syn::Type), NilError> {
-        ModStructure::from_value(value).map(|mod_structure| mod_structure.mod_ty(mod_ident))
-    }
-
-    pub struct NilError;
-
-    struct ModStructure {
-        item_const: Option<syn::ItemConst>,
-        field_mods: Vec<syn::ItemMod>,
-        access_impls: Vec<syn::ItemImpl>,
-        convert_impls: Vec<syn::ItemImpl>,
+    pub struct ModStructure {
+        pub ty: syn::Type,
+        pub expr: syn::Expr,
+        pub item_mod: syn::ItemMod,
     }
 
     impl ModStructure {
-        fn from_value(value: Value) -> Result<Self, NilError> {
+        pub fn from_value(mod_ident: syn::Ident, value: Value) -> Self {
             match value {
-                Value::Nil => Err(NilError),
+                Value::Nil => Self::from_primitive(
+                    mod_ident,
+                    syn::parse_quote! { () },
+                    syn::parse_quote! { () },
+                    NIL_IMPLS,
+                ),
                 Value::Boolean(value) => Self::from_primitive(
+                    mod_ident,
                     syn::parse_quote! { bool },
                     syn::parse_quote! { #value },
                     BOOLEAN_IMPLS,
                 ),
                 Value::PosInt(value) => Self::from_primitive(
+                    mod_ident,
                     syn::parse_quote! { u64 },
                     syn::parse_quote! { #value },
                     POS_INT_IMPLS,
                 ),
                 Value::NegInt(value) => Self::from_primitive(
+                    mod_ident,
                     syn::parse_quote! { i64 },
                     syn::parse_quote! { #value },
                     NEG_INT_IMPLS,
                 ),
                 Value::Float(value) => Self::from_primitive(
+                    mod_ident,
                     syn::parse_quote! { f64 },
                     syn::parse_quote! { #value },
                     FLOAT_IMPLS,
                 ),
                 Value::String(value) => Self::from_primitive(
+                    mod_ident,
                     syn::parse_quote! { &'static str },
                     syn::parse_quote! { #value },
                     STRING_IMPLS,
                 ),
                 Value::Array(value) => Self::from_container(
+                    mod_ident,
                     value.into_iter().enumerate(),
                     |index| Key::index_ty(*index),
                     ARRAY_IMPLS,
                 ),
-                Value::Table(value) => {
-                    Self::from_container(value.into_iter(), |name| Key::name_ty(name), TABLE_IMPLS)
-                }
+                Value::Table(value) => Self::from_container(
+                    mod_ident,
+                    value.into_iter(),
+                    |name| Key::name_ty(name),
+                    TABLE_IMPLS,
+                ),
             }
         }
 
         fn from_primitive(
+            mod_ident: syn::Ident,
             ty: syn::Type,
             expr: syn::Expr,
             convert_items: &[PrimitiveConvertItem],
-        ) -> Result<Self, NilError> {
-            let repr_ty = Self::repr_ty();
-            Ok(Self {
-                item_const: Some(syn::parse_quote! {
-                    const EXPR: #ty = #expr;
-                }),
-                field_mods: Vec::new(),
-                access_impls: Vec::new(),
-                convert_impls: convert_items
-                    .iter()
-                    .map(|convert_item| {
-                        let ty = (convert_item.ty_fn)();
-                        let expr = (convert_item.expr_fn)(&syn::parse_quote! { EXPR });
-                        syn::parse_quote! {
-                            impl ::inline_config::__private::Convert<#ty> for #repr_ty {
-                                fn convert() -> #ty {
-                                    #expr
-                                }
+        ) -> Self {
+            let from_impls = convert_items
+                .iter()
+                .map(|convert_item| {
+                    let ty = (convert_item.ty_fn)();
+                    let expr = (convert_item.expr_fn)(&syn::parse_quote! { SRC });
+                    syn::parse_quote! {
+                        impl From<Type> for #ty {
+                            fn from(_value: Type) -> Self {
+                                #expr
                             }
                         }
-                    })
-                    .collect(),
-            })
+                    }
+                })
+                .collect();
+            Self::from_fields(
+                mod_ident,
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                from_impls,
+                Some(syn::parse_quote! {
+                    const SRC: #ty = #expr;
+                }),
+            )
         }
 
         fn from_container<T>(
+            mod_ident: syn::Ident,
             items: impl Iterator<Item = (T, Value)>,
             key_ty_fn: fn(&T) -> syn::Type,
             convert_items: &[ContainerConvertItem<T>],
-        ) -> Result<Self, NilError> {
-            let repr_ty = Self::repr_ty();
-            let mut tags = Vec::new();
-            let mut field_mods = Vec::new();
-            let mut field_tys = Vec::new();
-            for (index, (tag, value)) in items.enumerate() {
-                let (field_mod, field_ty) =
-                    Self::from_value(value)?.mod_ty(quote::format_ident!("_{index}"));
-                tags.push(tag);
-                field_mods.push(field_mod);
-                field_tys.push(field_ty);
-            }
-            Ok(Self {
-                item_const: None,
-                field_mods,
-                access_impls: tags
-                    .iter()
-                    .zip(field_tys.iter())
-                    .map(|(tag, field_ty)| {
-                        let key_ty = key_ty_fn(tag);
+        ) -> Self {
+            let (((key_tys, field_tys), field_mods), tags): (((Vec<_>, Vec<_>), Vec<_>), Vec<_>) =
+                items
+                    .enumerate()
+                    .map(|(index, (tag, value))| {
+                        let structure = Self::from_value(quote::format_ident!("_{index}"), value);
+                        (((key_ty_fn(&tag), structure.ty), structure.item_mod), tag)
+                    })
+                    .unzip();
+            let generic = syn::Ident::new("__inline_config__T", proc_macro2::Span::call_site());
+            let (where_predicates, exprs): (Vec<syn::WherePredicate>, Vec<syn::Expr>) = field_tys
+                .iter()
+                .map(|field_ty| {
+                    (
                         syn::parse_quote! {
-                            impl ::inline_config::__private::AccessKey<#key_ty> for #repr_ty {
-                                type Repr = #field_ty;
+                            #field_ty: Default + Into<#generic>
+                        },
+                        syn::parse_quote! {
+                            <#field_ty as Into<#generic>>::into(<#field_ty as Default>::default())
+                        },
+                    )
+                })
+                .unzip();
+            let from_impls = convert_items
+                .iter()
+                .map(|convert_item| {
+                    let ty = (convert_item.ty_fn)(&generic);
+                    let expr = (convert_item.expr_fn)(&tags, &exprs);
+                    syn::parse_quote! {
+                        impl<#generic> From<Type> for #ty
+                        where
+                            #(#where_predicates,)*
+                        {
+                            fn from(value: Type) -> Self {
+                                #expr
                             }
                         }
-                    })
-                    .collect(),
-                convert_impls: {
-                    let generic =
-                        syn::Ident::new("__inline_config__T", proc_macro2::Span::call_site());
-                    let where_predicates: Vec<syn::WherePredicate> = field_tys
-                        .iter()
-                        .map(|field_ty| {
-                            syn::parse_quote! {
-                                #field_ty: ::inline_config::__private::Convert<#generic>
-                            }
-                        })
-                        .collect();
-                    let exprs: Vec<syn::Expr> = field_tys
-                        .iter()
-                        .map(|field_ty| {
-                            syn::parse_quote! {
-                                <#field_ty as ::inline_config::__private::Convert<#generic>>::convert()
-                            }
-                        })
-                        .collect();
-                    convert_items
-                        .iter()
-                        .map(|convert_item| {
-                            let ty = (convert_item.ty_fn)(&generic);
-                            let expr = (convert_item.expr_fn)(&tags, &exprs);
-                            syn::parse_quote! {
-                                impl<#generic> ::inline_config::__private::Convert<#ty> for #repr_ty
-                                where
-                                    #(#where_predicates,)*
-                                {
-                                    fn convert() -> #ty {
-                                        #expr
-                                    }
-                                }
-                            }
-                        })
-                        .collect()
-                },
-            })
+                    }
+                })
+                .collect();
+            Self::from_fields(mod_ident, key_tys, field_tys, field_mods, from_impls, None)
         }
 
-        fn repr_ty() -> syn::Ident {
-            syn::parse_quote! { Repr }
-        }
+        fn from_fields(
+            mod_ident: syn::Ident,
+            key_tys: Vec<syn::Type>,
+            field_tys: Vec<syn::Type>,
+            field_mods: Vec<syn::ItemMod>,
+            from_impls: Vec<syn::ItemImpl>,
+            src_const: Option<syn::ItemConst>,
+        ) -> Self {
+            let item_struct: syn::ItemStruct = syn::parse_quote! {
+                #[derive(Clone, Copy, Default)]
+                pub struct Type;
+            };
+            let item_static: syn::ItemStatic = syn::parse_quote! {
+                pub static EXPR: Type = Type;
+            };
+            let ref_default_impl: syn::ItemImpl = syn::parse_quote! {
+                impl Default for &'static Type {
+                    fn default() -> Self {
+                        &EXPR
+                    }
+                }
+            };
+            let index_key_impls: Vec<syn::ItemImpl> = key_tys
+                .iter()
+                .zip(field_tys.iter())
+                .map(|(key_ty, field_ty)| {
+                    syn::parse_quote! {
+                        impl ::std::ops::Index<#key_ty> for Type {
+                            type Output = #field_ty;
 
-        fn mod_ty(&self, mod_ident: syn::Ident) -> (syn::ItemMod, syn::Type) {
-            let repr_ty = Self::repr_ty();
-            let Self {
-                item_const,
-                field_mods,
-                access_impls,
-                convert_impls,
-            } = self;
-            (
+                            fn index(&self, _index: #key_ty) -> &Self::Output {
+                                <&'static #field_ty>::default()
+                            }
+                        }
+                    }
+                })
+                .collect();
+            let index_path_impls: Vec<syn::ItemImpl> = [
                 syn::parse_quote! {
-                    pub mod #mod_ident {
-                        pub struct #repr_ty;
-                        #item_const
-                        #(#field_mods)*
-                        #(#access_impls)*
-                        #(#convert_impls)*
+                    impl ::std::ops::Index<::inline_config::__private::PathNil> for Type {
+                        type Output = Type;
+
+                        fn index(&self, _index: ::inline_config::__private::PathNil) -> &Self::Output {
+                            <&'static Type as Default>::default()
+                        }
                     }
                 },
                 syn::parse_quote! {
-                    #mod_ident::#repr_ty
+                    impl<K, KS> ::std::ops::Index<::inline_config::__private::PathCons<K, KS>> for Type
+                    where
+                        Type: ::std::ops::Index<K, Output: ::std::ops::Index<KS, Output: 'static>>,
+                        &'static <<Type as ::std::ops::Index<K>>::Output as ::std::ops::Index<KS>>::Output: Default,
+                    {
+                        type Output = <<Type as ::std::ops::Index<K>>::Output as ::std::ops::Index<KS>>::Output;
+
+                        fn index(&self, _index: ::inline_config::__private::PathCons<K, KS>) -> &Self::Output {
+                            <&'static <<Type as ::std::ops::Index<K>>::Output as ::std::ops::Index<KS>>::Output as Default>::default()
+                        }
+                    }
                 },
-            )
+            ].into();
+            Self {
+                ty: syn::parse_quote! {
+                    #mod_ident::Type
+                },
+                expr: syn::parse_quote! {
+                    #mod_ident::EXPR
+                },
+                item_mod: syn::parse_quote! {
+                    pub mod #mod_ident {
+                        #item_struct
+                        #item_static
+                        #ref_default_impl
+                        #(#index_key_impls)*
+                        #(#index_path_impls)*
+                        #(#field_mods)*
+                        #(#from_impls)*
+                        #src_const
+                    }
+                },
+            }
         }
     }
 
@@ -279,6 +339,8 @@ mod expand_mod {
             }
         };
     }
+
+    static NIL_IMPLS: &[PrimitiveConvertItem] = &[];
 
     static BOOLEAN_IMPLS: &[PrimitiveConvertItem] = &[PrimitiveConvertItem {
         ty_fn: || syn::parse_quote! { bool },

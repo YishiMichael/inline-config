@@ -41,24 +41,4 @@ impl<Name> Default for KeyName<Name> {
 pub struct PathNil;
 
 #[derive(Default)]
-pub struct PathCons<K, KS>(K, KS);
-
-pub trait AccessKey<K> {
-    type Repr;
-}
-
-pub trait AccessPath<P> {
-    type Repr;
-}
-
-impl<R> AccessPath<PathNil> for R {
-    type Repr = R;
-}
-
-impl<R, K, KS> AccessPath<PathCons<K, KS>> for R
-where
-    R: AccessKey<K>,
-    <R as AccessKey<K>>::Repr: AccessPath<KS>,
-{
-    type Repr = <<R as AccessKey<K>>::Repr as AccessPath<KS>>::Repr;
-}
+pub struct PathCons<K, KS>(pub K, pub KS);

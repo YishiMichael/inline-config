@@ -5,13 +5,15 @@
 //! Below is a basic example illustrating how to declare a config type and access data from it.
 //!
 //! ```
-//! use inline_config::{Get, config, path};
+//! use inline_config::{config, path};
 //!
-//! // The syntax mostly follows from type alias declaration, but generates a unit struct `MyConfig`.
-//! // When there are multiple sources, latter ones overwrite former ones.
-//! // Including a file from disk is also possible, see `examples/include.rs`.
-//! #[config]
-//! pub type MyConfig = toml!(
+//! // Declare a config module containing literal sources.
+//! // With `export(static = MY_CONFIG)`, a static variable `MY_CONFIG` will be brought into scope.
+//! #[config(export(static = MY_CONFIG))]
+//! mod my_config {
+//!     // When there are multiple sources, latter ones overwrite former ones.
+//!     // Including a file from disk is also possible, see `examples/include.rs`.
+//!     toml!(
 //!     r#"
 //!         title = "TOML example"
 //!
@@ -19,30 +21,33 @@
 //!         owner = "Tom"
 //!         timeout = 2000
 //!         ports = [ 8000, 8001, 8002 ]
-//!     "#,
+//!     "#
+//!     );
+//!     toml!(
 //!     r#"
 //!         [server]
 //!         timeout = 5000
 //!     "#
-//! );
+//!     );
+//! }
 //!
-//! // Multiple types may be compatible. As a cost, type annotation is always required.
-//! let title: &str = MyConfig.get(path!(title));
+//! // Multiple types may implement `From` trait, so type annotations are required.
+//! let title: &str = MY_CONFIG[path!(title)].into();
 //! assert_eq!("TOML example", title);
-//! let title: String = MyConfig.get(path!(title));
+//! let title: String = MY_CONFIG[path!(title)].into();
 //! assert_eq!("TOML example", title);
 //!
 //! // A deeper path.
-//! let owner: &str = MyConfig.get(path!(server.owner));
+//! let owner: &str = MY_CONFIG[path!(server.owner)].into();
 //! assert_eq!("Tom", owner);
 //!
 //! // Any numerical types.
-//! let timeout: u32 = MyConfig.get(path!(server.timeout));
+//! let timeout: u32 = MY_CONFIG[path!(server.timeout)].into();
 //! assert_eq!(5000, timeout);
-//! let timeout: f32 = MyConfig.get(path!(server.timeout));
+//! let timeout: f32 = MY_CONFIG[path!(server.timeout)].into();
 //!
 //! // A homogeneous array can be accessed as `Vec<T>`.
-//! let ports: Vec<u64> = MyConfig.get(path!(server.ports));
+//! let ports: Vec<u64> = MY_CONFIG[path!(server.ports)].into();
 //! assert_eq!([8000, 8001, 8002].to_vec(), ports);
 //! ```
 //!
@@ -90,27 +95,18 @@
 //! * `toml` - supports TOML file format. Enabled by default.
 //! * `indexmap` - enables preserving orders of tables.
 
-mod convert;
 mod key;
 
-/// Declares a config type.
-///
-/// A config type is declared using the type alias syntax, in the form illustrated below:
+/// Declares a config module.
 ///
 /// ```ignore
 /// #[config]
-/// <VIS> type <TYPE> = <FORMAT>!(<SRC>);
-///
-/// #[config(<FORMAT>)]
-/// <VIS> type <TYPE> = <FORMAT>!(<SRC>, <SRC>, <SRC>);
+/// <VIS> mod <IDENT> {
+///     <FORMAT>!(<SRC>);
+///     <FORMAT>!(<SRC>);
+///     <FORMAT>!(<SRC>);
+/// }
 /// ```
-///
-/// The `<TYPE>` shall be a new identifier (not already defined).
-/// After expansion, for each `<TYPE>` the following symbols are brought into scope:
-///
-/// * A unit struct `<TYPE>`;
-/// * A module `__<TYPE>` for internal usage.
-///
 /// When there are multiple sources, they got merged recursively per field, with latter ones overwriting former ones.
 /// All null values need to be overwritten eventually.
 ///
@@ -120,6 +116,28 @@ mod key;
 ///
 /// * `r#"name = "Tom""#`
 /// * `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/example_config.toml"))`
+///
+/// After expansion, a type `Type` and a static variable `EXPR` holding config data will become available inside the module, i.e.
+///
+/// ```ignore
+/// <VIS> mod <IDENT> {
+///     pub struct Type;
+///     pub static EXPR: Type = Type;
+///     // Other internal implementation details...
+/// }
+/// ```
+///
+/// Users now can freely use `<IDENT>::Type` and `<IDENT>::EXPR`.
+/// Optionally, for convenience, you can export these items directly into the scope via `export` arguments:
+///
+/// ```ignore
+/// #[config(export(type = <TYPE_IDENT>, const = <CONST_IDENT>, static = <STATIC_IDENT>))]
+/// ```
+///
+/// Each will yield
+/// * `type = <TYPE_IDENT>` -> `pub type <TYPE_IDENT> = <IDENT>::Type;`
+/// * `const = <CONST_IDENT>` -> `pub const <CONST_IDENT>: <IDENT>::Type = <IDENT>::EXPR;`
+/// * `static = <STATIC_IDENT>` -> `pub static <STATIC_IDENT>: <IDENT>::Type = <IDENT>::EXPR;`
 ///
 /// [`proc_macro_expand`]: https://github.com/rust-lang/rust/issues/90765
 /// [`macro_string`]: https://docs.rs/macro-string/latest/macro_string/
@@ -132,7 +150,7 @@ pub use inline_config_macros::config;
 /// The name may be quoted if it is not a valid identifier (e.g. contains `-`).
 pub use inline_config_macros::path;
 
-/// The type version of [`path!()`]. Used in type parameters of [`Get`].
+/// The type version of [`path!()`]. Used in type bounds.
 pub use inline_config_macros::Path;
 
 /// Defines a data structure that can be converted directly from a compatible container.
@@ -156,17 +174,7 @@ pub use inline_config_macros::Path;
 /// ```
 pub use inline_config_macros::ConfigData;
 
-/// A trait modeling type compatibility.
-///
-/// A type bound `C: Get<P, T>` means the data at path `P` from config `C` is compatible with and can be converted into `T`.
-///
-/// This trait is not meant to be custom implemented; all implementations are induced from [`config`] macro.
-pub trait Get<P, T> {
-    fn get(&self, path: P) -> T;
-}
-
 #[doc(hidden)]
 pub mod __private {
-    pub use crate::convert::*;
     pub use crate::key::*;
 }

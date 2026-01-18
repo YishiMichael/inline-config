@@ -3,7 +3,7 @@ use darling::FromField;
 
 #[derive(FromField)]
 #[darling(attributes(config_data))]
-struct ConfigDataFieldAttrs {
+struct ConfigDataFieldArgs {
     rename: Option<String>,
 }
 
@@ -16,45 +16,47 @@ pub fn config_data(input: syn::ItemStruct) -> syn::Result<syn::ItemImpl> {
         .as_ref()
         .map(|where_clause| where_clause.predicates.iter().collect())
         .unwrap_or_default();
-    let mut members = Vec::new();
-    let mut key_tys = Vec::new();
-    let mut tys = Vec::new();
-    match &input.fields {
-        syn::Fields::Unit => {}
-        syn::Fields::Unnamed(fields_unnamed) => {
-            for (index, field) in fields_unnamed.unnamed.iter().enumerate() {
+
+    let (members, key_tys, tys) = match &input.fields {
+        syn::Fields::Unit => (Vec::new(), Vec::new(), Vec::new()),
+        syn::Fields::Unnamed(fields_unnamed) => fields_unnamed.unnamed.iter().enumerate().fold(
+            (Vec::new(), Vec::new(), Vec::new()),
+            |(mut members, mut key_tys, mut tys), (index, field)| {
                 members.push(syn::Member::from(index));
                 key_tys.push(Key::index_ty(index));
                 tys.push(&field.ty);
-            }
-        }
-        syn::Fields::Named(fields_named) => {
-            for field in &fields_named.named {
+                (members, key_tys, tys)
+            },
+        ),
+        syn::Fields::Named(fields_named) => fields_named.named.iter().try_fold(
+            (Vec::new(), Vec::new(), Vec::new()),
+            |(mut members, mut key_tys, mut tys), field| {
                 let ident = field.ident.as_ref().unwrap().clone();
-                let attrs = ConfigDataFieldAttrs::from_field(field)
-                    .map_err(|e| syn::Error::new_spanned(field, e))?;
-                let name = attrs
+                let args = ConfigDataFieldArgs::from_field(field)?;
+                let name = args
                     .rename
                     .unwrap_or_else(|| syn::ext::IdentExt::unraw(&ident).to_string());
                 members.push(syn::Member::from(ident));
                 key_tys.push(Key::name_ty(&name));
                 tys.push(&field.ty);
-            }
-        }
+                Ok::<_, syn::Error>((members, key_tys, tys))
+            },
+        )?,
     };
     let generic = syn::Ident::new("__inline_config__R", proc_macro2::Span::call_site());
     Ok(syn::parse_quote! {
-        impl<#(#generics_params,)* #generic> ::inline_config::__private::ConvertData<#generic> for #ident<#(#generics_params),*>
+        impl<#(#generics_params,)* #generic> From<#generic> for #ident<#(#generics_params),*>
         where
-            #(
-                #generic: ::inline_config::__private::AccessKey<#key_tys>,
-                <#generic as ::inline_config::__private::AccessKey<#key_tys>>::Repr: ::inline_config::__private::Convert<#tys>,
-            )*
+            #(#generic: ::std::ops::Index<#key_tys, Output: Default + Into<#tys>>,)*
             #(#where_predicates)*
         {
-            fn convert_data() -> Self {
+            fn from(_value: #generic) -> Self {
                 #ident {
-                    #(#members: <<#generic as ::inline_config::__private::AccessKey<#key_tys>>::Repr as ::inline_config::__private::Convert<#tys>>::convert(),)*
+                    #(#members:
+                        <<#generic as ::std::ops::Index<#key_tys>>::Output as Into<#tys>>::into(
+                            <<#generic as ::std::ops::Index<#key_tys>>::Output as Default>::default(),
+                        ),
+                    )*
                 }
             }
         }
