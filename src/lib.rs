@@ -8,13 +8,14 @@
 //! use inline_config::{config, path};
 //!
 //! // Declare a config module containing literal sources.
-//! // With `export(static = MY_CONFIG)`, a static variable `MY_CONFIG` will be brought into scope.
+//! // With `export(static = MY_CONFIG)`,
+//! // a static variable `MY_CONFIG` will be brought into scope.
 //! #[config(export(static = MY_CONFIG))]
 //! mod my_config {
-//!     // When there are multiple sources, latter ones overwrite former ones.
-//!     // Including a file from disk is also possible, see `examples/include.rs`.
+//!     // When there are multiple sources,
+//!     // latter ones overwrite former ones.
 //!     toml!(
-//!     r#"
+//!         r#"
 //!         title = "TOML example"
 //!
 //!         [server]
@@ -29,9 +30,13 @@
 //!         timeout = 5000
 //!         "#
 //!     );
+//!
+//!     // Including a file from disk is also possible,
+//!     // see `examples/include.rs`.
 //! }
 //!
-//! // Multiple types may implement `From` trait, so type annotations are required.
+//! // Use `Index`, `From` traits to access data.
+//! // Different types may be accessible from a field.
 //! let title: &str = MY_CONFIG[path!(title)].into();
 //! assert_eq!("TOML example", title);
 //! let title: String = MY_CONFIG[path!(title)].into();
@@ -70,6 +75,9 @@
 //! | Table | [`std::collections::BTreeMap<&str, T>`] if homogeneous,<br>[`std::collections::BTreeMap<String, T>`] if homogeneous,<br>[`indexmap::IndexMap<&str, T>`] if homogeneous\*,<br>[`indexmap::IndexMap<String, T>`] if homogeneous\*,<br>User-defined structs deriving [`ConfigData`] with named fields |
 //!
 //! \* Only available when enabling `indexmap` feature flag.
+//!
+//! [`indexmap::IndexMap<&str, T>`]: https://docs.rs/indexmap/latest/indexmap/map/struct.IndexMap.html
+//! [`indexmap::IndexMap<String, T>`]: https://docs.rs/indexmap/latest/indexmap/map/struct.IndexMap.html
 //!
 //! ### Container types
 //!

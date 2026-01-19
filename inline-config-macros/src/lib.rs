@@ -8,11 +8,12 @@ mod format;
 mod path;
 mod value;
 
-fn emit_impl_or_error<T: quote::ToTokens>(result: syn::Result<T>) -> proc_macro::TokenStream {
+fn emit_tokens_or_error<T: quote::ToTokens>(result: syn::Result<T>) -> proc_macro::TokenStream {
     match result {
-        Ok(output) => output.into_token_stream().into(),
-        Err(e) => proc_macro_error::abort!(e.span(), e),
+        Ok(output) => output.into_token_stream(),
+        Err(e) => e.to_compile_error(),
     }
+    .into()
 }
 
 /// Declares a config module.
@@ -52,7 +53,7 @@ fn emit_impl_or_error<T: quote::ToTokens>(result: syn::Result<T>) -> proc_macro:
 /// #[config(export(type = <TYPE_IDENT>, const = <CONST_IDENT>, static = <STATIC_IDENT>))]
 /// ```
 ///
-/// Each will yield
+/// Each will yield a corresponding item:
 ///
 /// | Argument | Generated item |
 /// | --- | --- |
@@ -62,13 +63,12 @@ fn emit_impl_or_error<T: quote::ToTokens>(result: syn::Result<T>) -> proc_macro:
 ///
 /// [`proc_macro_expand`]: https://github.com/rust-lang/rust/issues/90765
 /// [`macro_string`]: https://docs.rs/macro-string/latest/macro_string/
-#[proc_macro_error::proc_macro_error]
 #[proc_macro_attribute]
 pub fn config(
     input: proc_macro::TokenStream,
     item: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
-    emit_impl_or_error(
+    emit_tokens_or_error(
         syn::parse(input)
             .and_then(|input| syn::parse(item).and_then(|item| config::config(input, item))),
     )
@@ -93,27 +93,35 @@ pub fn config(
 ///     r#mod: String, // matches "mod"
 /// }
 /// ```
-#[proc_macro_error::proc_macro_error]
 #[proc_macro_derive(ConfigData, attributes(config_data))]
 pub fn config_data(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    emit_impl_or_error(syn::parse(item).and_then(config_data::config_data))
+    emit_tokens_or_error(syn::parse(item).and_then(config_data::config_data))
 }
 
 /// Constructs a path with which one accesses a nested-in piece of data from config.
 ///
-/// A path can be constructed by a sequence of keys, separated by `.`.
-/// A key can be either an index (access an array field) or a name (access a table field).
+/// A path can be constructed by a sequence of keys, separated by `.`, i.e.
+///
+/// ```ignore
+/// path!(<KEY>.<KEY>.<KEY>)
+/// ```
+///
+/// Every `<KEY>` can be either an index (access an array field) or a name (access a table field).
 /// The name may be quoted if it is not a valid identifier (e.g. contains `-`).
-#[proc_macro_error::proc_macro_error]
+/// The following are all valid keys:
+///
+/// * `key`
+/// * `"key"`
+/// * `"key-in-kebab-case"`
+/// * `0`
 #[proc_macro]
 pub fn path(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    emit_impl_or_error(syn::parse(input).map(path::Path::expr))
+    emit_tokens_or_error(syn::parse(input).map(path::Path::expr))
 }
 
 /// The type version of [`path!()`]. Used in type bounds.
-#[proc_macro_error::proc_macro_error]
 #[proc_macro]
 #[allow(non_snake_case)]
 pub fn Path(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    emit_impl_or_error(syn::parse(input).map(path::Path::ty))
+    emit_tokens_or_error(syn::parse(input).map(path::Path::ty))
 }

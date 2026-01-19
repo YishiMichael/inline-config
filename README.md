@@ -7,7 +7,7 @@ Effortlessly embed config modules and access with any compatible types.
 [![Docs](https://img.shields.io/docsrs/inline-config?style=for-the-badge&logo=docs.rs)](https://docs.rs/inline-config)
 [![CI](https://img.shields.io/github/actions/workflow/status/YishiMichael/inline-config/rust.yml?style=for-the-badge&logo=github&label=CI)](https://github.com/YishiMichael/inline-config)
 
-A procedual macro [`config`](https://docs.rs/inline-config/latest/inline_config/macro.config.html) is provided to parse sources at compile time, generate corresponding data structures, from which we can access values via the [`Index`](https://doc.rust-lang.org/std/ops/trait.Index.html) trait and the [`Into`](https://doc.rust-lang.org/std/convert/trait.Into.html) trait.
+A procedual macro [`config`](https://docs.rs/inline-config/latest/inline_config/macro.config.html) is provided to parse sources at compile time, generate corresponding data structures, from which we can access values via the [`Index`](https://doc.rust-lang.org/std/ops/trait.Index.html) trait and the [`From`](https://doc.rust-lang.org/std/convert/trait.From.html) trait.
 
 ## Features
 
@@ -32,11 +32,12 @@ In your source file, declare a module using [`config`](https://docs.rs/inline-co
 use inline_config::config;
 
 // Declare a config module containing literal sources.
-// With `export(static = MY_CONFIG)`, a static variable `MY_CONFIG` will be brought into scope.
+// With `export(static = MY_CONFIG)`,
+// a static variable `MY_CONFIG` will be brought into scope.
 #[config(export(static = MY_CONFIG))]
 mod my_config {
-    // When there are multiple sources, latter ones overwrite former ones.
-    // Including a file from disk is also possible, see `examples/include.rs`.
+    // When there are multiple sources,
+    // latter ones overwrite former ones.
     toml!(
         r#"
         title = "TOML example"
@@ -53,6 +54,9 @@ mod my_config {
         timeout = 5000
         "#
     );
+
+    // Including a file from disk is also possible,
+    // see `examples/include.rs`.
 }
 ```
 
@@ -61,7 +65,8 @@ Then, access the data inside using the [`path!()`](https://docs.rs/inline-config
 ```rust
 use inline_config::path;
 
-// Multiple types may implement `From` trait, so type annotations are required.
+// Use `Index`, `From` traits to access data.
+// Different types may be accessible from a field.
 let title: &str = MY_CONFIG[path!(title)].into();
 assert_eq!("TOML example", title);
 let title: String = MY_CONFIG[path!(title)].into();

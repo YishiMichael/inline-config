@@ -27,12 +27,8 @@ version = "0.23.0"
 [dependencies.macro-string]
 version = "0.1.4"
 
-[dependencies.proc-macro-error]
-version = "1.0.4"
-
 [dependencies.proc-macro2]
 version = "1.0.103"
-features = ["span-locations"]
 
 [dependencies.quote]
 version = "1.0.42"

@@ -31,7 +31,7 @@ categories.workspace = true
 
 [features]
 default = ["json", "toml", "yaml"]
-indexmap = ["inline-config-macros/indexmap", "dep:indexmap"]
+indexmap = ["inline-config-macros/indexmap"]
 json = ["inline-config-macros/json"]
 toml = ["inline-config-macros/toml"]
 yaml = ["inline-config-macros/yaml"]
@@ -40,9 +40,8 @@ yaml = ["inline-config-macros/yaml"]
 version = "0.3.0"
 path = "inline-config-macros"
 
-[dependencies.indexmap]
+[dev-dependencies.indexmap]
 version = "2.12.1"
-optional = true
 
 [[example]]
 name = "basic"
