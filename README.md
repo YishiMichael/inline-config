@@ -1,13 +1,13 @@
 # inline-config
 
-Effortlessly embed config as static data and access with any compatible data structures.
+Effortlessly embed config modules and access with any compatible types.
 
 [![Version](https://img.shields.io/crates/v/inline-config?style=for-the-badge)](https://crates.io/crates/inline-config)
 [![License](https://img.shields.io/crates/l/inline-config?style=for-the-badge)](https://github.com/YishiMichael/inline-config/blob/main/LICENSE-MIT)
 [![Docs](https://img.shields.io/docsrs/inline-config?style=for-the-badge&logo=docs.rs)](https://docs.rs/inline-config)
 [![CI](https://img.shields.io/github/actions/workflow/status/YishiMichael/inline-config/rust.yml?style=for-the-badge&logo=github&label=CI)](https://github.com/YishiMichael/inline-config)
 
-A procedual macro [`config`](https://docs.rs/inline-config/latest/inline_config/macro.config.html) is provided to parse sources at compile time, generate static data structures, from which we can access values via the [`Index`](https://doc.rust-lang.org/std/ops/trait.Index.html) trait and the [`Into`](https://doc.rust-lang.org/std/convert/trait.Into.html) trait.
+A procedual macro [`config`](https://docs.rs/inline-config/latest/inline_config/macro.config.html) is provided to parse sources at compile time, generate corresponding data structures, from which we can access values via the [`Index`](https://doc.rust-lang.org/std/ops/trait.Index.html) trait and the [`Into`](https://doc.rust-lang.org/std/convert/trait.Into.html) trait.
 
 ## Features
 
@@ -38,20 +38,20 @@ mod my_config {
     // When there are multiple sources, latter ones overwrite former ones.
     // Including a file from disk is also possible, see `examples/include.rs`.
     toml!(
-    r#"
+        r#"
         title = "TOML example"
 
         [server]
         owner = "Tom"
         timeout = 2000
         ports = [ 8000, 8001, 8002 ]
-    "#
+        "#
     );
     toml!(
-    r#"
+        r#"
         [server]
         timeout = 5000
-    "#
+        "#
     );
 }
 ```

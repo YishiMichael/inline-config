@@ -18,7 +18,7 @@ categories = ["config", "data-structures"]
 
 [package]
 name = "inline-config"
-description = "Effortlessly embed config as static data and access with any compatible data structures"
+description = "Effortlessly embed config modules and access with any compatible types"
 version.workspace = true
 edition.workspace = true
 authors.workspace = true
