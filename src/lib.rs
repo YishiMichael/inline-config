@@ -2,7 +2,7 @@
 //!
 //! ## Example
 //!
-//! Below is a basic example illustrating how to declare a config type and access data from it.
+//! Below is a basic example illustrating how to declare a config module and access data from it.
 //!
 //! ```
 //! use inline_config::{config, path};

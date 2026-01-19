@@ -27,7 +27,7 @@ mod chained_config {
 
 fn main() {
     let name: &str = MY_CONFIG[path!(owner.name)].into();
-    println!("{name}");
+    println!("{name:?}");
     let name: &str = CHAINED_CONFIG[path!(owner.name)].into();
-    println!("{name}");
+    println!("{name:?}");
 }

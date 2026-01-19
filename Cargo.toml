@@ -13,7 +13,7 @@ license = "MIT OR Apache-2.0"
 readme = "README.md"
 homepage = "https://github.com/YishiMichael/inline-config"
 repository = "https://github.com/YishiMichael/inline-config"
-keywords = ["config", "include", "static", "inline"]
+keywords = ["config", "include", "inline", "structure"]
 categories = ["config", "data-structures"]
 
 [package]

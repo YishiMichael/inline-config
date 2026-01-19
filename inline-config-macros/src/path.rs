@@ -77,7 +77,7 @@ impl Key {
 
     pub fn name_ty(name: &str) -> syn::Type {
         // Referenced from frunk_proc_macro_helpers/lib.rs
-        let tys = name.chars().map(|c| -> syn::Type {
+        let tys = name.trim().chars().map(|c| -> syn::Type {
             match c {
                 'A'..='Z' | 'a'..='z' => {
                     let ident = quote::format_ident!("{c}");
@@ -91,7 +91,7 @@ impl Key {
                         ::inline_config::__private::chars::#ident
                     }
                 }
-                _ => {
+                c => {
                     let codepoint = c as u32;
                     syn::parse_quote! {
                         ::inline_config::__private::chars::UC<#codepoint>

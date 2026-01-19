@@ -1,7 +1,10 @@
-use inline_config::{ConfigData, Path, config, path};
+#![allow(unused)]
 
-/// Edited from TOML official example.
-#[config(export(static = TOML_EXAMPLE))]
+use inline_config::{config, path};
+
+// Edited from TOML official example.
+// After expansion, it will contain a type item `Type` and a static item `EXPR`.
+#[config]
 mod toml_example {
     toml!(
         r#"
@@ -41,15 +44,16 @@ mod toml_example {
         "#
     );
 }
+pub static TOML_EXAMPLE: toml_example::Type = toml_example::EXPR;
 
 fn primitive_types() {
     // Get a string at field `title`.
     let title: String = TOML_EXAMPLE[path!(title)].into();
-    println!("{title}");
+    println!("{title:?}");
 
     // String references are also compatible.
     let title: &'static str = TOML_EXAMPLE[path!(title)].into();
-    println!("{title}");
+    println!("{title:?}");
 
     // Incompatible types will cause compile error.
     // let title: u32 = TOML_EXAMPLE[path!(title)].into();
@@ -59,23 +63,23 @@ fn primitive_types() {
 
     // Nested paths chained by `.`.
     let owner_name: &str = TOML_EXAMPLE[path!(owner.name)].into();
-    println!("{owner_name}");
+    println!("{owner_name:?}");
     let server: &str = TOML_EXAMPLE[path!(database.server)].into();
-    println!("{server}");
+    println!("{server:?}");
 
     // Non-identifier key can be wrapped in quotes.
     let date_of_birth: &str = TOML_EXAMPLE[path!(owner."date-of-birth")].into();
-    println!("{date_of_birth}");
+    println!("{date_of_birth:?}");
 
     // Any numeric types are compatible for numbers.
     let connection_max: u32 = TOML_EXAMPLE[path!(database.connection_max)].into();
-    println!("{connection_max}");
+    println!("{connection_max:?}");
     let connection_max: u64 = TOML_EXAMPLE[path!(database.connection_max)].into();
-    println!("{connection_max}");
+    println!("{connection_max:?}");
 
     // Index into an array using `.0`.
     let port: u32 = TOML_EXAMPLE[path!(database.ports.0)].into();
-    println!("{port}");
+    println!("{port:?}");
 }
 
 fn container_types() {
@@ -90,7 +94,7 @@ fn container_types() {
 }
 
 fn user_types() {
-    #![allow(unused)]
+    use inline_config::ConfigData;
 
     // Define a struct to match structured data from config.
     // Named structs corresponds to tables.
@@ -144,6 +148,25 @@ fn user_types() {
     println!("{hosts:?}");
 }
 
+fn export_symbols() {
+    // We can optionally export symbols via passing arguments to `config`.
+    // Supported arguments are `type`, `const`, `static`.
+    #[config(export(type = YamlConfig, static = YAML_CONFIG))]
+    mod yaml_config {
+        yaml!(
+            r#"
+            info:
+                name: Tom Preston-Werner
+                preferred-name: ""
+            "#
+        );
+    }
+
+    let config: YamlConfig = YAML_CONFIG;
+    let preferred_name: &str = config[path!(info."preferred-name")].into();
+    println!("{preferred_name:?}");
+}
+
 fn overwrite() {
     // Some formats like json have null values. They need to be resolved eventually.
     // Include multiple sources in the mod to perform overwriting. The latter overwrites the former.
@@ -173,10 +196,12 @@ fn overwrite() {
 
     // `year-of-birth` is newly added by the latter config source.
     let year_of_birth: u32 = CHAINED_CONFIG[path!("year-of-birth")].into();
-    println!("{year_of_birth}");
+    println!("{year_of_birth:?}");
 }
 
 fn generic() {
+    use inline_config::Path;
+
     #[config(export(static = PRIMARY_CONFIG))]
     mod primary_config {
         json!(
@@ -210,6 +235,7 @@ fn generic() {
     }
 
     // After overwriting, the two configs have different types.
+    // Use trait bounds to model the intersection of these types.
     fn get_names<C>(config: &C) -> (String, String)
     where
         C: std::ops::Index<Path!(name), Output: Copy + Into<String>>,
@@ -230,6 +256,8 @@ fn generic() {
 fn main() {
     println!("\n* primitive_types\n");
     primitive_types();
+    println!("\n* export_symbols\n");
+    export_symbols();
     println!("\n* container_types\n");
     container_types();
     println!("\n* user_types\n");
