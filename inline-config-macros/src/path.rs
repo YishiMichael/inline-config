@@ -91,12 +91,9 @@ impl Key {
                         ::inline_config::__private::chars::#ident
                     }
                 }
-                c => {
-                    let codepoint = c as u32;
-                    syn::parse_quote! {
-                        ::inline_config::__private::chars::UC<#codepoint>
-                    }
-                }
+                c => syn::parse_quote! {
+                    ::inline_config::__private::chars::Ch<#c>
+                },
             }
         });
         syn::parse_quote! {

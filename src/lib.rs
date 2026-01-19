@@ -112,13 +112,13 @@ pub mod __private {
     // Borrowed from `frunk_core::labelled::chars`.
     pub mod chars {
         macro_rules! create_enums_for {
-        ($($c:tt)*) => {
-            $(
-                #[allow(non_camel_case_types)]
-                pub struct $c;
-            )*
-        };
-    }
+            ($($ident:ident)*) => {
+                $(
+                    #[allow(non_camel_case_types)]
+                    pub struct $ident;
+                )*
+            };
+        }
 
         create_enums_for!(
             A B C D E F G H I J K L M N O P Q R S T U V W X Y Z
@@ -126,8 +126,8 @@ pub mod __private {
             _0 _1 _2 _3 _4 _5 _6 _7 _8 _9 __
         );
 
-        // For unicode chars.
-        pub struct UC<const CODEPOINT: u32>;
+        // For all other chars.
+        pub struct Ch<const CHAR: char>;
     }
 
     pub struct KeyIndex<Index>(PhantomData<Index>);
@@ -150,5 +150,5 @@ pub mod __private {
     pub struct PathNil;
 
     #[derive(Default)]
-    pub struct PathCons<K, KS>(pub K, pub KS);
+    pub struct PathCons<K, KS>(K, KS);
 }
