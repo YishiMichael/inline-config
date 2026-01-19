@@ -130,15 +130,10 @@ pub mod __private {
         pub struct Ch<const CHAR: char>;
     }
 
-    pub struct KeyIndex<Index>(PhantomData<Index>);
+    #[derive(Default)]
+    pub struct KeyIndex<const INDEX: usize>;
 
     pub struct KeyName<Name>(PhantomData<Name>);
-
-    impl<Index> Default for KeyIndex<Index> {
-        fn default() -> Self {
-            Self(PhantomData)
-        }
-    }
 
     impl<Name> Default for KeyName<Name> {
         fn default() -> Self {

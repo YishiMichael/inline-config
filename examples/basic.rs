@@ -80,6 +80,9 @@ fn primitive_types() {
     // Index into an array using `.0`.
     let port: u32 = TOML_EXAMPLE[path!(database.ports.0)].into();
     println!("{port:?}");
+
+    // Array index out-of-bound will cause compile error.
+    // let port: u32 = TOML_EXAMPLE[path!(database.ports.9)].into();
 }
 
 fn container_types() {

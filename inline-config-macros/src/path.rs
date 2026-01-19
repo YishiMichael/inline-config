@@ -63,15 +63,8 @@ impl Path {
 
 impl Key {
     pub fn index_ty(index: usize) -> syn::Type {
-        let index_str = index.to_string();
-        let tys = index_str.chars().map(|c| -> syn::Type {
-            let ident = quote::format_ident!("_{c}");
-            syn::parse_quote! {
-                ::inline_config::__private::chars::#ident
-            }
-        });
         syn::parse_quote! {
-            ::inline_config::__private::KeyIndex<(#(#tys,)*)>
+            ::inline_config::__private::KeyIndex<#index>
         }
     }
 
