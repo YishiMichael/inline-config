@@ -51,19 +51,17 @@ pub fn config(args: ConfigArgs, item: syn::ItemMod) -> syn::Result<ConfigTokenIt
     }
     let value = items
         .into_iter()
-        .map(|item| {
-            let mac = match item {
-                syn::Item::Macro(syn::ItemMacro { mac, .. }) => mac,
-                item => Err(syn::Error::new_spanned(&item, "expecting macro"))?,
-            };
-            let mac_span = syn::spanned::Spanned::span(&mac);
-            let syn::Macro { path, tokens, .. } = mac;
-            let format = Format::from_str(&path.require_ident()?.to_string())
-                .ok_or(syn::Error::new_spanned(&path, "format not supported"))?;
-            let source: macro_string::MacroString = syn::parse2(tokens)?;
-            format
-                .parse(&source.0)
-                .map_err(|e| syn::Error::new(mac_span, e))
+        .map(|item| match item {
+            syn::Item::Macro(syn::ItemMacro {
+                mac: syn::Macro { path, tokens, .. },
+                ..
+            }) => {
+                let format = Format::from_str(&path.require_ident()?.to_string())
+                    .ok_or(syn::Error::new_spanned(&path, "format not supported"))?;
+                let source: macro_string::MacroString = syn::parse2(tokens)?;
+                format.parse(&source.eval()?).map_err(|e| source.error(e))
+            }
+            item => Err(syn::Error::new_spanned(&item, "expecting macro"))?,
         })
         .sum::<syn::Result<_>>()?;
 
