@@ -145,5 +145,64 @@ pub mod __private {
     pub struct PathNil;
 
     #[derive(Default)]
-    pub struct PathCons<K, KS>(K, KS);
+    pub struct PathLCons<K, P>(K, P);
+
+    #[derive(Default)]
+    pub struct PathRCons<P, K>(P, K);
+
+    // trait PathAppend<TK> {
+    //     type Output;
+    // }
+
+    trait PathExtend<TP> {
+        type Output;
+    }
+
+    // impl<TK> PathAppend<TK> for PathNil {
+    //     type Output = PathCons<TK, PathNil>;
+    // }
+
+    // impl<K, P, TK> PathAppend<TK> for PathCons<K, P>
+    // where
+    //     P: PathAppend<TK>,
+    // {
+    //     type Output = PathCons<K, <P as PathAppend<TK>>::Output>;
+    // }
+
+    impl<P> PathExtend<PathNil> for P {
+        type Output = P;
+    }
+
+    impl<LP, K, RP> PathExtend<PathLCons<K, RP>> for LP
+    where
+        PathRCons<LP, K>: PathExtend<RP>,
+    {
+        type Output = <PathRCons<LP, K> as PathExtend<RP>>::Output;
+    }
+
+    #[derive(Clone, Copy)]
+    pub struct Config<M, P>(PhantomData<(M, P)>);
+
+    // impl<M, P> Default for Config<M, P> {
+    //     fn default() -> Self {
+    //         Self(PhantomData)
+    //     }
+    // }
+
+    // impl<M, P> Default for &Config<M, P> {
+    //     fn default() -> Self {
+    //         &Config(PhantomData)
+    //     }
+    // }
+
+    impl<M, P, I> std::ops::Index<I> for Config<M, P>
+    where
+        P: PathExtend<I>,
+    {
+        type Output = Config<M, <P as PathExtend<I>>::Output>;
+
+        fn index(&self, _index: PathCons<K, KS>) -> &Self::Output {
+            &Config(PhantomData)
+        }
+    }
 }

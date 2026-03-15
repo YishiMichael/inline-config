@@ -1,16 +1,14 @@
-name: Rust
+name: rust
 
 on:
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
+  [push, pull_request]
 
 jobs:
-  build:
+  rust:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
+    - name: Checkout
+      uses: actions/checkout@v6
     - name: Build
       run: cargo build --all-targets
     - name: Test

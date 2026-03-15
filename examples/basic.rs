@@ -44,7 +44,7 @@ mod toml_example {
         "#
     );
 }
-pub static TOML_EXAMPLE: toml_example::Type = toml_example::EXPR;
+pub static TOML_EXAMPLE: toml_example::Type = toml_example::Type + toml_example::Type;
 
 fn primitive_types() {
     // Get a string at field `title`.
