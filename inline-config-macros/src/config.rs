@@ -162,8 +162,8 @@ trait ValueVariant {
 
     fn to_item_const(&self, ident: &syn::Ident) -> syn::ItemConst {
         let ((children_tys, children_exprs), (item_impls_index, item_mods)): (
-            (Vec<syn::Type>, Vec<syn::Expr>),
-            (Vec<syn::ItemImpl>, Vec<syn::ItemMod>),
+            (Vec<_>, Vec<_>),
+            (Vec<_>, Vec<_>),
         ) = self
             .children()
             .iter()
@@ -172,13 +172,13 @@ trait ValueVariant {
                 let mod_ident = quote::format_ident!("_{index}");
                 let child_ident = quote::format_ident!("Type");
                 let item_const = value.to_item_const(&child_ident);
-                let child_ty = syn::parse_quote! {
+                let child_ty: syn::Type = syn::parse_quote! {
                     #mod_ident::#child_ident
                 };
-                let child_expr = syn::parse_quote! {
+                let child_expr: syn::Expr = syn::parse_quote! {
                     #mod_ident::#child_ident
                 };
-                let item_impl_index = syn::parse_quote! {
+                let item_impl_index: syn::ItemImpl = syn::parse_quote! {
                     impl ::std::ops::Index<#key> for #ident {
                         type Output = #child_ty;
 
@@ -187,7 +187,7 @@ trait ValueVariant {
                         }
                     }
                 };
-                let item_mod = syn::parse_quote! {
+                let item_mod: syn::ItemMod = syn::parse_quote! {
                     pub mod #mod_ident {
                         pub struct #child_ident;
 

@@ -1,6 +1,6 @@
 #![allow(unused)]
 
-use inline_config::{path, Config};
+use inline_config::{Config, path};
 
 // Edited from TOML official example.
 #[derive(Config)]
