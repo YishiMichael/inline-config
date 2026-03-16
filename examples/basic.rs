@@ -3,7 +3,6 @@
 use inline_config::{path, Config};
 
 // Edited from TOML official example.
-// After expansion, it will contain a type item `Type` and a static item `EXPR`.
 #[derive(Config)]
 #[config(toml(
     r#"
@@ -47,11 +46,11 @@ pub struct TomlExample;
 fn primitive_types() {
     // Get a string at field `title`.
     let title: String = TomlExample[path!(title)].into();
-    println!("{title:?}");
+    dbg!(title);
 
     // String references are also compatible.
     let title: &'static str = TomlExample[path!(title)].into();
-    println!("{title:?}");
+    dbg!(title);
 
     // Incompatible types will cause compile error.
     // let title: u32 = TomlExample[path!(title)].into();
@@ -61,23 +60,23 @@ fn primitive_types() {
 
     // Nested paths chained by `.`.
     let owner_name: &str = TomlExample[path!(owner.name)].into();
-    println!("{owner_name:?}");
+    dbg!(owner_name);
     let server: &str = TomlExample[path!(database.server)].into();
-    println!("{server:?}");
+    dbg!(server);
 
     // Non-identifier key can be wrapped in quotes.
     let date_of_birth: &str = TomlExample[path!(owner."date-of-birth")].into();
-    println!("{date_of_birth:?}");
+    dbg!(date_of_birth);
 
     // Any numeric types are compatible for numbers.
     let connection_max: u32 = TomlExample[path!(database.connection_max)].into();
-    println!("{connection_max:?}");
+    dbg!(connection_max);
     let connection_max: u64 = TomlExample[path!(database.connection_max)].into();
-    println!("{connection_max:?}");
+    dbg!(connection_max);
 
     // Index into an array using `.0`.
     let port: u32 = TomlExample[path!(database.ports.0)].into();
-    println!("{port:?}");
+    dbg!(port);
 
     // Array index out-of-bound will cause compile error.
     // let port: u32 = TomlExample[path!(database.ports.9)].into();
@@ -86,158 +85,152 @@ fn primitive_types() {
 fn container_types() {
     // Collect all items from a homogeneous array into a `Vec`.
     let ports: Vec<u32> = TomlExample[path!(database.ports)].into();
-    println!("{ports:?}");
+    dbg!(ports);
 
     // Collect all items from a homogeneous table into a `BTreeMap`.
     // See `order.rs` if the order of entries needs to be preserved.
     let languages: std::collections::BTreeMap<&str, u32> = TomlExample[path!(languages)].into();
-    println!("{languages:?}");
+    dbg!(languages);
 }
 
 fn user_types() {
-    use inline_config::ConfigData;
+    use inline_config::FromConfig;
 
     // Define a struct to match structured data from config.
     // Named structs corresponds to tables.
-    #[derive(ConfigData, Debug)]
+    #[derive(FromConfig, Debug)]
     struct Server {
         ip: String,
         dc: String,
     }
 
     let server: Server = TomlExample[path!(servers.alpha)].into();
-    println!("{server:?}");
+    dbg!(server);
 
     // We can even compose with other containers!
     let servers: std::collections::BTreeMap<String, Server> = TomlExample[path!(servers)].into();
-    println!("{servers:?}");
+    dbg!(servers);
 
     // Fields do not need to fully match. We only require all keys show up in the source data.
     // Generics supported.
-    #[derive(ConfigData, Debug)]
+    #[derive(FromConfig, Debug)]
     struct PartialServer<'a> {
         ip: &'a str,
     }
     let partial_server: PartialServer<'_> = TomlExample[path!(servers.alpha)].into();
-    println!("{partial_server:?}");
+    dbg!(partial_server);
 
     // Field renaming supported. Needed if the key is not a valid rust identifier.
-    #[derive(ConfigData, Debug)]
+    #[derive(FromConfig, Debug)]
     struct Owner<S> {
         name: S, // matches "name"
-        #[config_data(rename = "date-of-birth")]
+        #[config(from = "date-of-birth")]
         date_of_birth: S, // matches "date-of-birth"
         r#mod: S, // matches "mod"
     }
     let owner: Owner<String> = TomlExample[path!(owner)].into();
-    println!("{owner:?}");
+    dbg!(owner);
 
     // Nesting supported.
-    #[derive(ConfigData, Debug)]
+    #[derive(FromConfig, Debug)]
     struct Root {
         title: String,
         owner: Owner<String>,
     }
     // An empty path fetches data at the root.
     let root: Root = TomlExample[path!()].into();
-    println!("{root:?}");
+    dbg!(root);
 
     // Unnamed structs corresponds to arrays.
-    #[derive(ConfigData, Debug)]
+    #[derive(FromConfig, Debug)]
     struct Hosts(String, String);
     let hosts: Hosts = TomlExample[path!(clients.hosts)].into();
-    println!("{hosts:?}");
+    dbg!(hosts);
 }
 
-fn export_symbols() {
-    // We can optionally export symbols via passing arguments to `config`.
-    // Supported arguments are `type`, `const`, `static`.
-    #[config(export(type = YamlConfig, static = YAML_CONFIG))]
-    mod yaml_config {
-        yaml!(
-            r#"
-            info:
-                name: Tom Preston-Werner
-                preferred-name: ""
-            "#
-        );
-    }
+fn yaml_example() {
+    // Formats in addition to TOML are also supported.
+    #[derive(Config)]
+    #[config(yaml(
+        r#"
+        info:
+            name: Tom Preston-Werner
+            preferred-name: ""
+        "#
+    ))]
+    struct YamlConfig;
 
-    let config: YamlConfig = YAML_CONFIG;
-    let preferred_name: &str = config[path!(info."preferred-name")].into();
-    println!("{preferred_name:?}");
+    let preferred_name: &str = YamlConfig[path!(info."preferred-name")].into();
+    dbg!(preferred_name);
 }
 
 fn overwrite() {
     // Some formats like json have null values. They need to be resolved eventually.
     // Include multiple sources in the mod to perform overwriting. The latter overwrites the former.
-    #[config(export(static = CHAINED_CONFIG))]
-    mod chained_config {
-        json!(
-            r#"
-            {
-                "name": "Tom Preston-Werner",
-                "preferred-name": null
-            }
-            "#
-        );
-        json!(
-            r#"
-            {
-                "preferred-name": "Tom",
-                "year-of-birth": 1979
-            }
-            "#
-        );
-    }
+    #[derive(Config)]
+    #[config(json(
+        r#"
+        {
+            "name": "Tom Preston-Werner",
+            "preferred-name": null
+        }
+        "#
+    ))]
+    #[config(json(
+        r#"
+        {
+            "preferred-name": "Tom",
+            "year-of-birth": 1979
+        }
+        "#
+    ))]
+    struct ChainedConfig;
 
     // `preferred-name` is overwritten by the latter config source.
-    let preferred_name: &str = CHAINED_CONFIG[path!("preferred-name")].into();
-    println!("{preferred_name:?}");
+    let preferred_name: &str = ChainedConfig[path!("preferred-name")].into();
+    dbg!(preferred_name);
 
     // `year-of-birth` is newly added by the latter config source.
-    let year_of_birth: u32 = CHAINED_CONFIG[path!("year-of-birth")].into();
-    println!("{year_of_birth:?}");
+    let year_of_birth: u32 = ChainedConfig[path!("year-of-birth")].into();
+    dbg!(year_of_birth);
 }
 
 fn generic() {
     use inline_config::Path;
 
-    #[config(export(static = PRIMARY_CONFIG))]
-    mod primary_config {
-        json!(
-            r#"
-            {
-                "name": "Tom Preston-Werner",
-                "preferred-name": ""
-            }
-            "#
-        );
-    }
+    #[derive(Config)]
+    #[config(json(
+        r#"
+        {
+            "name": "Tom Preston-Werner",
+            "preferred-name": ""
+        }
+        "#
+    ))]
+    struct PrimaryConfig;
 
-    #[config(export(static = CHAINED_CONFIG))]
-    mod chained_config {
-        json!(
-            r#"
-            {
-                "name": "Tom Preston-Werner",
-                "preferred-name": ""
-            }
-            "#
-        );
-        json!(
-            r#"
-            {
-                "preferred-name": "Tom",
-                "year-of-birth": 1979
-            }
-            "#
-        );
-    }
+    #[derive(Config)]
+    #[config(json(
+        r#"
+        {
+            "name": "Tom Preston-Werner",
+            "preferred-name": ""
+        }
+        "#
+    ))]
+    #[config(json(
+        r#"
+        {
+            "preferred-name": "Tom",
+            "year-of-birth": 1979
+        }
+        "#
+    ))]
+    struct ChainedConfig;
 
     // After overwriting, the two configs have different types.
     // Use trait bounds to model the intersection of these types.
-    fn get_names<C>(config: &C) -> (String, String)
+    fn get_names<C>(config: C) -> (String, String)
     where
         C: std::ops::Index<Path!(name), Output: Copy + Into<String>>,
         C: std::ops::Index<Path!("preferred-name"), Output: Copy + Into<String>>,
@@ -248,17 +241,17 @@ fn generic() {
         )
     }
 
-    let names = get_names(&PRIMARY_CONFIG);
-    println!("{names:?}");
-    let names = get_names(&CHAINED_CONFIG);
-    println!("{names:?}");
+    let names = get_names(PrimaryConfig);
+    dbg!(names);
+    let names = get_names(ChainedConfig);
+    dbg!(names);
 }
 
 fn main() {
     println!("\n* primitive_types\n");
     primitive_types();
-    println!("\n* export_symbols\n");
-    export_symbols();
+    println!("\n* yaml_example\n");
+    yaml_example();
     println!("\n* container_types\n");
     container_types();
     println!("\n* user_types\n");

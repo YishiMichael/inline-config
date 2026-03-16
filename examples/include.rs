@@ -1,33 +1,25 @@
-use inline_config::{config, path};
+use inline_config::{path, Config};
 
 // Include from a config file from disk.
-#[config(export(static = MY_CONFIG))]
-mod my_config {
-    toml!(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/examples/example_config.toml"
-    )));
-}
+#[derive(Config)]
+#[config(toml(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/example_config.toml"))))]
+struct MyConfig;
 
 // Included configs and inline configs can be arbitrarily composed.
-#[config(export(static = CHAINED_CONFIG))]
-mod chained_config {
-    toml!(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/examples/example_config.toml"
-    )));
-    toml!(
-        r#"
-        [owner]
-            name = "Tom"
-            dob = "1979-05-27"
-        "#
-    );
-}
+#[derive(Config)]
+#[config(toml(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/example_config.toml"))))]
+#[config(toml(
+    r#"
+    [owner]
+    name = "Tom"
+    dob = "1979-05-27"
+    "#
+))]
+struct ChainedConfig;
 
 fn main() {
-    let name: &str = MY_CONFIG[path!(owner.name)].into();
-    println!("{name:?}");
-    let name: &str = CHAINED_CONFIG[path!(owner.name)].into();
-    println!("{name:?}");
+    let name: &str = MyConfig[path!(owner.name)].into();
+    dbg!(name);
+    let name: &str = ChainedConfig[path!(owner.name)].into();
+    dbg!(name);
 }

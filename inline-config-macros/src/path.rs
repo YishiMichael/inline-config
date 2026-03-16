@@ -67,19 +67,6 @@ pub struct Path {
 }
 
 impl Path {
-    // pub fn left_cons(self, key: Key) -> Self {
-    //     Self::LCons(key, Box::new(self))
-    // }
-
-    // pub fn right_cons(self, key: Key) -> Self {
-    //     Self::RCons(Box::new(self), key)
-    // }
-
-    pub fn append(mut self, key: Key) -> Self {
-        self.keys.push(key);
-        self
-    }
-
     pub fn ty(self) -> syn::Type {
         syn::parse_quote! {
             #self

@@ -87,7 +87,7 @@ pub fn config(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
 ///     r#mod: String, // matches "mod"
 /// }
 /// ```
-#[proc_macro_derive(ConfigData, attributes(from_config))]
+#[proc_macro_derive(FromConfig, attributes(config))]
 pub fn from_config(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     emit_tokens_or_error(syn::parse(item).and_then(from_config::from_config))
 }
