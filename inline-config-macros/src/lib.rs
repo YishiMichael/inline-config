@@ -27,7 +27,7 @@ fn emit_tokens_or_error<T: quote::ToTokens>(result: syn::Result<T>) -> proc_macr
 /// All sources within a config type can only share the same format.
 /// The format may be omitted if it is clear from extensions of included paths.
 ///
-/// Note, Every format has a corresponding feature gate.
+/// Each format has a corresponding feature gate.
 ///
 /// ### Attribute `src`
 ///

@@ -1,11 +1,12 @@
 use inline_config::{Config, path};
 
 // Include from a config file from disk.
+// The format is clear from path extension, so no need to specify.
 #[derive(Config)]
 #[config(src = include_env!("$CARGO_MANIFEST_DIR/examples/example_config.toml"))]
 struct MyConfig;
 
-// Included configs and inline configs can be arbitrarily composed.
+// Included sources and inline sources can be arbitrarily composed.
 #[derive(Config)]
 #[config(src = include_env!("$CARGO_MANIFEST_DIR/examples/example_config.toml"))]
 #[config(src = r#"
