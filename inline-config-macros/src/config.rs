@@ -1,48 +1,144 @@
 use crate::format::Format;
 use crate::path::Key;
 use crate::value::{Map, Value};
+use darling::{FromDeriveInput, FromMeta};
 
-pub struct ConfigItem {
+#[derive(FromDeriveInput)]
+#[darling(supports(struct_unit), attributes(config), forward_attrs)]
+struct ConfigItem {
     ident: syn::Ident,
-    value: Value,
+    format: Option<Format>,
+    #[darling(multiple)]
+    src: Vec<darling::util::SpannedValue<Source>>,
 }
 
-pub fn config(item: syn::ItemStruct) -> syn::Result<ConfigItem> {
+enum Source {
+    Include(std::path::PathBuf),
+    Lit(String),
+}
+
+impl Source {
+    fn content(&self) -> std::io::Result<std::borrow::Cow<'_, str>> {
+        match self {
+            Self::Include(path) => {
+                // Resolve the path relative to the current file.
+                let path = if path.is_absolute() {
+                    path.clone()
+                } else {
+                    // Rust analyzer hasn't implemented `Span::file()`.
+                    // https://github.com/rust-lang/rust-analyzer/issues/15950
+                    std::path::PathBuf::from(proc_macro2::Span::call_site().file())
+                        .parent()
+                        .ok_or(std::io::ErrorKind::AddrNotAvailable)?
+                        .join(path)
+                };
+                Ok(std::borrow::Cow::Owned(std::fs::read_to_string(path)?))
+            }
+            Self::Lit(content) => Ok(std::borrow::Cow::Borrowed(content)),
+        }
+    }
+
+    fn extension(&self) -> Option<&std::ffi::OsStr> {
+        match self {
+            Self::Include(path) => path.extension(),
+            Self::Lit(_) => None,
+        }
+    }
+
+    fn resolve_env(path: &str) -> Result<String, std::env::VarError> {
+        let mut chars = path.chars().peekable();
+        let mut resolved = String::new();
+        while let Some(c) = chars.next() {
+            if c != '$' {
+                resolved.push(c);
+                continue;
+            }
+            if chars.peek() == Some(&'$') {
+                chars.next();
+                resolved.push('$');
+                continue;
+            }
+            let mut variable = String::new();
+            while let Some(&c) = chars.peek() {
+                if matches!(c, '0'..='9' | 'A'..='Z' | 'a'..='z' | '_') {
+                    chars.next();
+                    variable.push(c);
+                } else {
+                    break;
+                }
+            }
+            resolved.push_str(&std::env::var(&variable)?);
+        }
+        Ok(resolved)
+    }
+}
+
+impl FromMeta for Source {
+    fn from_expr(expr: &syn::Expr) -> darling::Result<Self> {
+        match expr {
+            syn::Expr::Macro(syn::ExprMacro {
+                mac: syn::Macro { path, tokens, .. },
+                ..
+            }) if path.is_ident("include") => Ok(Self::Include(std::path::PathBuf::from(
+                syn::parse2::<syn::LitStr>(tokens.clone())?.value(),
+            ))),
+            syn::Expr::Macro(syn::ExprMacro {
+                mac: syn::Macro { path, tokens, .. },
+                ..
+            }) if path.is_ident("include_env") => Ok(Self::Include(std::path::PathBuf::from(
+                Self::resolve_env(&syn::parse2::<syn::LitStr>(tokens.clone())?.value())
+                    .map_err(|e| syn::Error::new_spanned(expr, e))?,
+            ))),
+            syn::Expr::Lit(syn::ExprLit {
+                lit: syn::Lit::Str(lit_str),
+                ..
+            }) => Ok(Self::Lit(lit_str.value())),
+            syn::Expr::Lit(lit) => Self::from_value(&lit.lit),
+            syn::Expr::Group(group) => Self::from_expr(&group.expr),
+            _ => Err(darling::Error::unexpected_expr_type(expr)),
+        }
+        .map_err(|e| e.with_span(expr))
+    }
+}
+
+pub fn config(item: syn::DeriveInput) -> syn::Result<syn::ItemConst> {
+    let config_item: ConfigItem = ConfigItem::from_derive_input(&item)?;
+    let format = config_item.format.map(Ok).unwrap_or_else(|| {
+        let mut extensions = config_item.src.iter().filter_map(|source| {
+            source
+                .extension()
+                .and_then(std::ffi::OsStr::to_str)
+                .and_then(Format::from_extension)
+        });
+        let first = extensions
+            .next()
+            .ok_or(syn::Error::new_spanned(&item, "Missing format"))?;
+        let other = extensions.find(|x| x != &first);
+        if let Some(other) = other {
+            Err(syn::Error::new_spanned(
+                &item,
+                format!("Multiple formats: {first:?}, {other:?}"),
+            ))
+        } else {
+            Ok(first)
+        }
+    })?;
     let mut errors = darling::Error::accumulator();
-    if matches!(item.fields, syn::Fields::Named(_)) {
-        errors.push(darling::Error::unsupported_shape("non-unit struct"));
-    }
-    if matches!(item.fields, syn::Fields::Unnamed(_)) {
-        errors.push(darling::Error::unsupported_shape("enum"));
-    }
-    let value = item
-        .attrs
+    let value: Value = config_item
+        .src
         .into_iter()
-        .filter(|attr| attr.path().is_ident("config"))
-        .filter_map(|attr| {
+        .filter_map(|source| {
             errors.handle_in(|| {
-                let meta_list: syn::MetaList =
-                    syn::parse2(attr.meta.require_list()?.tokens.clone())?;
-                let format = Format::from_str(&meta_list.path.require_ident()?.to_string()).ok_or(
-                    syn::Error::new_spanned(&meta_list.path, "format not supported"),
-                )?;
-                let source: macro_string::MacroString = syn::parse2(meta_list.tokens.clone())?;
-                let value = format.parse(&source.eval()?).map_err(|e| source.error(e))?;
-                Ok(value)
+                Ok(source
+                    .content()
+                    .map_err(|e| Box::new(e) as Box<dyn std::error::Error>)
+                    .and_then(|content| format.parse(content.as_ref()))
+                    .map_err(|e| syn::Error::new(source.span(), e))?)
             })
         })
         .sum();
     errors.finish()?;
-    Ok(ConfigItem {
-        ident: item.ident,
-        value,
-    })
-}
-
-impl quote::ToTokens for ConfigItem {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        self.value.to_item_const(&self.ident).to_tokens(tokens);
-    }
+    Ok(value.to_item_const(&config_item.ident))
 }
 
 struct ConvertImpl {

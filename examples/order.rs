@@ -1,14 +1,13 @@
 use inline_config::{path, Config};
 
 #[derive(Config)]
-#[config(toml(
-    r#"
+#[config(format = "toml")]
+#[config(src = r#"
     [fruits]
     apple = "red"
     orange = "orange"
     grape = "purple"
-    "#
-))]
+"#)]
 struct MyConfig;
 
 fn main() {

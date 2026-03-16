@@ -4,8 +4,8 @@ use inline_config::{path, Config};
 
 // Edited from TOML official example.
 #[derive(Config)]
-#[config(toml(
-    r#"
+#[config(format = "toml")]
+#[config(src = r#"
     title = "TOML Example"
 
     [owner]
@@ -39,8 +39,7 @@ use inline_config::{path, Config};
     json = 2001
     yaml = 2001
     toml = 2013
-    "#
-))]
+"#)]
 pub struct TomlExample;
 
 fn primitive_types() {
@@ -124,7 +123,7 @@ fn user_types() {
     #[derive(FromConfig, Debug)]
     struct Owner<S> {
         name: S, // matches "name"
-        #[config(from = "date-of-birth")]
+        #[config(name = "date-of-birth")]
         date_of_birth: S, // matches "date-of-birth"
         r#mod: S, // matches "mod"
     }
@@ -151,13 +150,12 @@ fn user_types() {
 fn yaml_example() {
     // Formats in addition to TOML are also supported.
     #[derive(Config)]
-    #[config(yaml(
-        r#"
+    #[config(format = "yaml")]
+    #[config(src = r#"
         info:
             name: Tom Preston-Werner
             preferred-name: ""
-        "#
-    ))]
+    "#)]
     struct YamlConfig;
 
     let preferred_name: &str = YamlConfig[path!(info."preferred-name")].into();
@@ -168,22 +166,19 @@ fn overwrite() {
     // Some formats like json have null values. They need to be resolved eventually.
     // Include multiple sources in the mod to perform overwriting. The latter overwrites the former.
     #[derive(Config)]
-    #[config(json(
-        r#"
+    #[config(format = "json")]
+    #[config(src = r#"
         {
             "name": "Tom Preston-Werner",
             "preferred-name": null
         }
-        "#
-    ))]
-    #[config(json(
-        r#"
+    "#)]
+    #[config(src = r#"
         {
             "preferred-name": "Tom",
             "year-of-birth": 1979
         }
-        "#
-    ))]
+    "#)]
     struct ChainedConfig;
 
     // `preferred-name` is overwritten by the latter config source.
@@ -199,33 +194,29 @@ fn generic() {
     use inline_config::Path;
 
     #[derive(Config)]
-    #[config(json(
-        r#"
+    #[config(format = "json")]
+    #[config(src = r#"
         {
             "name": "Tom Preston-Werner",
             "preferred-name": ""
         }
-        "#
-    ))]
+    "#)]
     struct PrimaryConfig;
 
     #[derive(Config)]
-    #[config(json(
-        r#"
+    #[config(format = "json")]
+    #[config(src = r#"
         {
             "name": "Tom Preston-Werner",
             "preferred-name": ""
         }
-        "#
-    ))]
-    #[config(json(
-        r#"
+    "#)]
+    #[config(src = r#"
         {
             "preferred-name": "Tom",
             "year-of-birth": 1979
         }
-        "#
-    ))]
+    "#)]
     struct ChainedConfig;
 
     // After overwriting, the two configs have different types.

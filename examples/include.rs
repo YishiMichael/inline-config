@@ -2,19 +2,17 @@ use inline_config::{path, Config};
 
 // Include from a config file from disk.
 #[derive(Config)]
-#[config(toml(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/example_config.toml"))))]
+#[config(src = include_env!("$CARGO_MANIFEST_DIR/examples/example_config.toml"))]
 struct MyConfig;
 
 // Included configs and inline configs can be arbitrarily composed.
 #[derive(Config)]
-#[config(toml(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/example_config.toml"))))]
-#[config(toml(
-    r#"
+#[config(src = include_env!("$CARGO_MANIFEST_DIR/examples/example_config.toml"))]
+#[config(src = r#"
     [owner]
     name = "Tom"
     dob = "1979-05-27"
-    "#
-))]
+"#)]
 struct ChainedConfig;
 
 fn main() {

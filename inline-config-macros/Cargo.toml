@@ -24,11 +24,9 @@ yaml = ["dep:serde_yaml"]
 [dependencies.darling]
 version = "0.23.0"
 
-[dependencies.macro-string]
-version = "0.2.0"
-
 [dependencies.proc-macro2]
 version = "1.0.106"
+features = ["span-locations"]
 
 [dependencies.quote]
 version = "1.0.44"
