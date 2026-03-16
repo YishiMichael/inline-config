@@ -7,7 +7,7 @@ Effortlessly embed config modules and access with any compatible types.
 [![Docs](https://img.shields.io/docsrs/inline-config?style=for-the-badge&logo=docs.rs)](https://docs.rs/inline-config)
 [![CI](https://img.shields.io/github/actions/workflow/status/YishiMichael/inline-config/rust.yml?style=for-the-badge&logo=github&label=CI)](https://github.com/YishiMichael/inline-config)
 
-A procedual macro [`config`](https://docs.rs/inline-config/latest/inline_config/macro.config.html) is provided to parse sources at compile time, generate corresponding data structures, from which we can access values via the [`Index`](https://doc.rust-lang.org/std/ops/trait.Index.html) trait and the [`From`](https://doc.rust-lang.org/std/convert/trait.From.html) trait.
+A procedual macro [`Config`](https://docs.rs/inline-config/latest/inline_config/macro.Config.html) is provided to parse sources at compile time, generate corresponding data structures, from which we can access values via the [`Index`](https://doc.rust-lang.org/std/ops/trait.Index.html) trait and the [`From`](https://doc.rust-lang.org/std/convert/trait.From.html) trait.
 
 ## Features
 
@@ -26,38 +26,33 @@ Add `inline-config` to your dependencies
 cargo add inline-config
 ```
 
-In your source file, declare a module using [`config`](https://docs.rs/inline-config/latest/inline_config/macro.config.html) holding the config data
+In your source file, derive a unit struct with [`Config`](https://docs.rs/inline-config/latest/inline_config/macro.Config.html) and attach the config data
 
 ```rust
-use inline_config::config;
+use inline_config::Config;
 
-// Declare a config module containing literal sources.
-// With `export(static = MY_CONFIG)`,
-// a static variable `MY_CONFIG` will be brought into scope.
-#[config(export(static = MY_CONFIG))]
-mod my_config {
-    // When there are multiple sources,
-    // latter ones overwrite former ones.
-    toml!(
-        r#"
-        title = "TOML example"
+// Declare a config type containing literal sources.
+#[derive(Config)]
+// While only using literal sources,
+// a format needs to be specified.
+// Including a file from disk is also possible,
+// see `examples/include.rs`.
+#[config(format = "toml")]
+// When there are multiple sources,
+// latter ones overwrite former ones.
+#[config(src = r#"
+    title = "TOML example"
 
-        [server]
-        owner = "Tom"
-        timeout = 2000
-        ports = [ 8000, 8001, 8002 ]
-        "#
-    );
-    toml!(
-        r#"
-        [server]
-        timeout = 5000
-        "#
-    );
-
-    // Including a file from disk is also possible,
-    // see `examples/include.rs`.
-}
+    [server]
+    owner = "Tom"
+    timeout = 2000
+    ports = [ 8000, 8001, 8002 ]
+"#)]
+#[config(src = r#"
+    [server]
+    timeout = 5000
+"#)]
+struct MyConfig;
 ```
 
 Then, access the data inside using the [`path!()`](https://docs.rs/inline-config/latest/inline_config/macro.path.html) macro
@@ -67,22 +62,22 @@ use inline_config::path;
 
 // Use `Index`, `From` traits to access data.
 // Different types may be accessible from a field.
-let title: &str = MY_CONFIG[path!(title)].into();
+let title: &str = MyConfig[path!(title)].into();
 assert_eq!("TOML example", title);
-let title: String = MY_CONFIG[path!(title)].into();
+let title: String = MyConfig[path!(title)].into();
 assert_eq!("TOML example", title);
 
 // A deeper path.
-let owner: &str = MY_CONFIG[path!(server.owner)].into();
+let owner: &str = MyConfig[path!(server.owner)].into();
 assert_eq!("Tom", owner);
 
 // Any numerical types.
-let timeout: u32 = MY_CONFIG[path!(server.timeout)].into();
+let timeout: u32 = MyConfig[path!(server.timeout)].into();
 assert_eq!(5000, timeout);
-let timeout: f32 = MY_CONFIG[path!(server.timeout)].into();
+let timeout: f32 = MyConfig[path!(server.timeout)].into();
 
 // A homogeneous array can be accessed as `Vec<T>`.
-let ports: Vec<u64> = MY_CONFIG[path!(server.ports)].into();
+let ports: Vec<u64> = MyConfig[path!(server.ports)].into();
 assert_eq!([8000, 8001, 8002].to_vec(), ports);
 ```
 

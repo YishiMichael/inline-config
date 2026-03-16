@@ -16,53 +16,38 @@ fn emit_tokens_or_error<T: quote::ToTokens>(result: syn::Result<T>) -> proc_macr
     .into()
 }
 
-/// Declares a config module.
+/// Attaches config data to a unit struct.
+///
+/// ### Attribute `format`
 ///
 /// ```ignore
-/// #[config]
-/// <VIS> mod <IDENT> {
-///     <FORMAT>!(<SRC>);
-///     <FORMAT>!(<SRC>);
-///     <FORMAT>!(<SRC>);
-/// }
+/// #[config(format = "toml")]
 /// ```
+///
+/// All sources within a config type can only share the same format.
+/// The format may be omitted if it is clear from extensions of included paths.
+///
+/// Note, Every format has a corresponding feature gate.
+///
+/// ### Attribute `src`
+///
+/// Config sources come in three flavors:
+///
+/// ```ignore
+/// #[config(src = "<SRC_LITERAL>")]
+/// #[config(src = include!("<PATH_LITERAL>"))]
+/// #[config(src = include_env!("<PATH_LITERAL>"))]
+/// ```
+///
+/// There can be an arbitrary number of sources, combined in arbitrary order, as long as they agree on the same format.
 /// When there are multiple sources, they got merged recursively per field, with latter ones overwriting former ones.
-/// All null values need to be overwritten eventually.
 ///
-/// Every `<SRC>` shall be a literal string, or a macro invocation expanding into a literal string.
-/// The full support of eager expansion is impossible without nightly-only feature [`proc_macro_expand`].
-/// A subset of eager expansion for built-in macros is handled by [`macro_string`] crate, which identifies both the following as valid sources:
-///
-/// * `r#"name = "Tom""#`
-/// * `include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/examples/example_config.toml"))`
-///
-/// After expansion, a type `Type` and a static variable `EXPR` holding config data will become available inside the module, i.e.
-///
-/// ```ignore
-/// <VIS> mod <IDENT> {
-///     pub struct Type;
-///     pub static EXPR: Type = Type;
-///     // Other internal implementation details...
-/// }
-/// ```
-///
-/// Users now can freely use `<IDENT>::Type` and `<IDENT>::EXPR`.
-/// Optionally, for convenience, you can export these items directly into the scope via `export` arguments:
-///
-/// ```ignore
-/// #[config(export(type = <TYPE_IDENT>, const = <CONST_IDENT>, static = <STATIC_IDENT>))]
-/// ```
-///
-/// Each will yield a corresponding item:
-///
-/// | Argument | Generated item |
-/// | --- | --- |
-/// | `type = <TYPE_IDENT>` | `pub type <TYPE_IDENT> = <IDENT>::Type;` |
-/// | `const = <CONST_IDENT>` | `pub const <CONST_IDENT>: <IDENT>::Type = <IDENT>::EXPR;` |
-/// | `static = <STATIC_IDENT>` | `pub static <STATIC_IDENT>: <IDENT>::Type = <IDENT>::EXPR;` |
-///
-/// [`proc_macro_expand`]: https://github.com/rust-lang/rust/issues/90765
-/// [`macro_string`]: https://docs.rs/macro-string/latest/macro_string/
+/// When including files, the paths are resolved relative to the call site file.
+/// `include_env!` specially supports environment variable interpolation -
+/// environment variables of form `$ENV_VAR` are interpolated. Escape `$` with `$$`.
+/// The support of environment variable interpolation is to aid any code analyzer to locate files,
+/// as environment variables like `$CARGO_MANIFEST_DIR` and `$OUT_DIR` resolve to absolute paths.
+/// This is mostly inspired by [include_dir](https://docs.rs/include_dir/latest/include_dir/) crate.
 #[proc_macro_derive(Config, attributes(config))]
 pub fn config(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
     emit_tokens_or_error(syn::parse(item).and_then(config::config))
@@ -70,19 +55,20 @@ pub fn config(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
 
 /// Defines a data structure that can be converted directly from a compatible container.
 ///
-/// One needs to ensure all field types, if containing custom types, shall inherit [`ConfigData`] as well.
+/// One needs to ensure all field types, if containing custom types, shall inherit [`FromConfig`] as well.
 /// Use structs with unnamed fields to access from arrays; use structs with named fields to access from tables.
 /// The fields do not necessarily need to be "full" - it may only contain a subset of fields in source data.
 ///
-/// To avoid non-identifier key names occurred in source config (e.g. contains `-`), use `#[from_config(rename = "...")]` on certain fields.
+/// To avoid non-identifier key names occurred in source config (e.g. contains `-`), use `#[config(name = "...")]` on certain named fields.
+/// Symmetrically, on unnamed fields you may want to use `#[config(index = ...)]` to remap array indices.
 ///
 /// ```
-/// use inline_config::ConfigData;
+/// use inline_config::FromConfig;
 ///
-/// #[derive(ConfigData)]
+/// #[derive(FromConfig)]
 /// struct MyStruct {
 ///     name: String, // matches "name"
-///     #[from_config(rename = "date-of-birth")]
+///     #[config(name = "date-of-birth")]
 ///     date_of_birth: String, // matches "date-of-birth"
 ///     r#mod: String, // matches "mod"
 /// }

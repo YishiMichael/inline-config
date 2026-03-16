@@ -5,58 +5,53 @@
 //! Below is a basic example illustrating how to declare a config module and access data from it.
 //!
 //! ```
-//! use inline_config::{config, path};
+//! use inline_config::{Config, path};
 //!
-//! // Declare a config module containing literal sources.
-//! // With `export(static = MY_CONFIG)`,
-//! // a static variable `MY_CONFIG` will be brought into scope.
-//! #[config(export(static = MY_CONFIG))]
-//! mod my_config {
-//!     // When there are multiple sources,
-//!     // latter ones overwrite former ones.
-//!     toml!(
-//!         r#"
-//!         title = "TOML example"
+//! // Declare a config type containing literal sources.
+//! #[derive(Config)]
+//! // While only using literal sources,
+//! // a format needs to be specified.
+//! // Including a file from disk is also possible,
+//! // see `examples/include.rs`.
+//! #[config(format = "toml")]
+//! // When there are multiple sources,
+//! // latter ones overwrite former ones.
+//! #[config(src = r#"
+//!     title = "TOML example"
 //!
-//!         [server]
-//!         owner = "Tom"
-//!         timeout = 2000
-//!         ports = [ 8000, 8001, 8002 ]
-//!         "#
-//!     );
-//!     toml!(
-//!         r#"
-//!         [server]
-//!         timeout = 5000
-//!         "#
-//!     );
-//!
-//!     // Including a file from disk is also possible,
-//!     // see `examples/include.rs`.
-//! }
+//!     [server]
+//!     owner = "Tom"
+//!     timeout = 2000
+//!     ports = [ 8000, 8001, 8002 ]
+//! "#)]
+//! #[config(src = r#"
+//!     [server]
+//!     timeout = 5000
+//! "#)]
+//! struct MyConfig;
 //!
 //! // Use `Index`, `From` traits to access data.
 //! // Different types may be accessible from a field.
-//! let title: &str = MY_CONFIG[path!(title)].into();
+//! let title: &str = MyConfig[path!(title)].into();
 //! assert_eq!("TOML example", title);
-//! let title: String = MY_CONFIG[path!(title)].into();
+//! let title: String = MyConfig[path!(title)].into();
 //! assert_eq!("TOML example", title);
 //!
 //! // A deeper path.
-//! let owner: &str = MY_CONFIG[path!(server.owner)].into();
+//! let owner: &str = MyConfig[path!(server.owner)].into();
 //! assert_eq!("Tom", owner);
 //!
 //! // Any numerical types.
-//! let timeout: u32 = MY_CONFIG[path!(server.timeout)].into();
+//! let timeout: u32 = MyConfig[path!(server.timeout)].into();
 //! assert_eq!(5000, timeout);
-//! let timeout: f32 = MY_CONFIG[path!(server.timeout)].into();
+//! let timeout: f32 = MyConfig[path!(server.timeout)].into();
 //!
 //! // A homogeneous array can be accessed as `Vec<T>`.
-//! let ports: Vec<u64> = MY_CONFIG[path!(server.ports)].into();
+//! let ports: Vec<u64> = MyConfig[path!(server.ports)].into();
 //! assert_eq!([8000, 8001, 8002].to_vec(), ports);
 //! ```
 //!
-//! See [`config`] and [`path!()`] for specs on those macros.
+//! See [`Config`] and [`path!()`] for specs on those macros.
 //!
 //! ## Compatible types
 //!
@@ -71,8 +66,8 @@
 //! | Signed Integer | [`i8`], [`i16`], [`i32`], [`i64`], [`i128`], [`isize`],<br>[`f32`], [`f64`] |
 //! | Float | [`f32`], [`f64`] |
 //! | String | [`&str`], [`String`] |
-//! | Array | [`Vec<T>`] if homogeneous,<br>User-defined structs deriving [`ConfigData`] with unnamed fields |
-//! | Table | [`std::collections::BTreeMap<&str, T>`] if homogeneous,<br>[`std::collections::BTreeMap<String, T>`] if homogeneous,<br>[`indexmap::IndexMap<&str, T>`] if homogeneous\*,<br>[`indexmap::IndexMap<String, T>`] if homogeneous\*,<br>User-defined structs deriving [`ConfigData`] with named fields |
+//! | Array | [`Vec<T>`] if homogeneous,<br>User-defined structs deriving [`FromConfig`] with unnamed fields |
+//! | Table | [`std::collections::BTreeMap<&str, T>`] if homogeneous,<br>[`std::collections::BTreeMap<String, T>`] if homogeneous,<br>[`indexmap::IndexMap<&str, T>`] if homogeneous\*,<br>[`indexmap::IndexMap<String, T>`] if homogeneous\*,<br>User-defined structs deriving [`FromConfig`] with named fields |
 //!
 //! \* Only available when enabling `indexmap` feature flag.
 //!
@@ -86,7 +81,7 @@
 //! This suggests you should use indices when accessing a field of an array, but use names when accessing a field of a table.
 //!
 //! Note that they are inhomogeneous in general (children are of different types).
-//! You need to define custom types and derive [`ConfigData`] if you want to access structured data.
+//! You need to define custom types and derive [`FromConfig`] if you want to access structured data.
 //! Define structs with unnamed fields to model an array, while structs with named fields to model a table.
 //! Specially, in the case when they do contain homogeneous data,
 //! arrays can be accessed as [`Vec<T>`], and tables can be accessed as [`std::collections::BTreeMap<&str, T>`] or [`std::collections::BTreeMap<String, T>`],
