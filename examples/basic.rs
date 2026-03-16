@@ -1,98 +1,96 @@
 #![allow(unused)]
 
-use inline_config::{config, path};
+use inline_config::{path, Config};
 
 // Edited from TOML official example.
 // After expansion, it will contain a type item `Type` and a static item `EXPR`.
-#[config]
-mod toml_example {
-    toml!(
-        r#"
-        title = "TOML Example"
+#[derive(Config)]
+#[config(toml(
+    r#"
+    title = "TOML Example"
 
-        [owner]
-        name = "Tom Preston-Werner"
-        dob = "1979-05-27"
-        date-of-birth = "1979-05-27"
-        mod = "toml"
+    [owner]
+    name = "Tom Preston-Werner"
+    dob = "1979-05-27"
+    date-of-birth = "1979-05-27"
+    mod = "toml"
 
-        [database]
-        server = "192.168.1.1"
-        ports = [ 8000, 8001, 8002 ]
-        connection_max = 5000
-        enabled = true
+    [database]
+    server = "192.168.1.1"
+    ports = [ 8000, 8001, 8002 ]
+    connection_max = 5000
+    enabled = true
 
-        [servers.alpha]
-        ip = "10.0.0.1"
-        dc = "eqdc10"
+    [servers.alpha]
+    ip = "10.0.0.1"
+    dc = "eqdc10"
 
-        [servers.beta]
-        ip = "10.0.0.2"
-        dc = "eqdc10"
+    [servers.beta]
+    ip = "10.0.0.2"
+    dc = "eqdc10"
 
-        [clients]
-        data = [ ["gamma", "delta"], [1, 2] ]
-        hosts = [
-          "alpha",
-          "omega"
-        ]
+    [clients]
+    data = [ ["gamma", "delta"], [1, 2] ]
+    hosts = [
+      "alpha",
+      "omega"
+    ]
 
-        [languages]
-        json = 2001
-        yaml = 2001
-        toml = 2013
-        "#
-    );
-}
-pub static TOML_EXAMPLE: toml_example::Type = toml_example::Type + toml_example::Type;
+    [languages]
+    json = 2001
+    yaml = 2001
+    toml = 2013
+    "#
+))]
+pub struct TomlExample;
 
 fn primitive_types() {
     // Get a string at field `title`.
-    let title: String = TOML_EXAMPLE[path!(title)].into();
+    let title: String = TomlExample[path!(title)].into();
     println!("{title:?}");
 
     // String references are also compatible.
-    let title: &'static str = TOML_EXAMPLE[path!(title)].into();
+    let title: &'static str = TomlExample[path!(title)].into();
     println!("{title:?}");
 
     // Incompatible types will cause compile error.
-    // let title: u32 = TOML_EXAMPLE[path!(title)].into();
+    // let title: u32 = TomlExample[path!(title)].into();
 
     // Missing keys will cause compile error.
-    // let _: u32 = TOML_EXAMPLE[path!(unknown)].into();
+    // let _: u32 = TomlExample[path!(unknown)].into();
 
     // Nested paths chained by `.`.
-    let owner_name: &str = TOML_EXAMPLE[path!(owner.name)].into();
+    let owner_name: &str = TomlExample[path!(owner.name)].into();
     println!("{owner_name:?}");
-    let server: &str = TOML_EXAMPLE[path!(database.server)].into();
+    let server: &str = TomlExample[path!(database.server)].into();
     println!("{server:?}");
 
     // Non-identifier key can be wrapped in quotes.
-    let date_of_birth: &str = TOML_EXAMPLE[path!(owner."date-of-birth")].into();
+    let date_of_birth: &str = TomlExample[path!(owner."date-of-birth")].into();
     println!("{date_of_birth:?}");
 
     // Any numeric types are compatible for numbers.
-    let connection_max: u32 = TOML_EXAMPLE[path!(database.connection_max)].into();
+    let connection_max: u32 = TomlExample[path!(database.connection_max)].into();
     println!("{connection_max:?}");
-    let connection_max: u64 = TOML_EXAMPLE[path!(database.connection_max)].into();
+    let connection_max: u64 = TomlExample[path!(database.connection_max)].into();
     println!("{connection_max:?}");
 
     // Index into an array using `.0`.
-    let port: u32 = TOML_EXAMPLE[path!(database.ports.0)].into();
+    let port: u32 = TomlExample[path!(database.ports.0)].into();
     println!("{port:?}");
 
     // Array index out-of-bound will cause compile error.
-    // let port: u32 = TOML_EXAMPLE[path!(database.ports.9)].into();
+    // let port: u32 = TomlExample[path!(database.ports.9)].into();
 }
 
 fn container_types() {
     // Collect all items from a homogeneous array into a `Vec`.
-    let ports: Vec<u32> = TOML_EXAMPLE[path!(database.ports)].into();
+    let ports: Vec<u32> = TomlExample[path!(database.ports)].into();
     println!("{ports:?}");
 
     // Collect all items from a homogeneous table into a `BTreeMap`.
     // See `order.rs` if the order of entries needs to be preserved.
-    let languages: std::collections::BTreeMap<&str, u32> = TOML_EXAMPLE[path!(languages)].into();
+    let languages: std::collections::BTreeMap<&str, u32> = TomlExample[path!(languages)].into();
     println!("{languages:?}");
 }
 
@@ -107,11 +105,11 @@ fn user_types() {
         dc: String,
     }
 
-    let server: Server = TOML_EXAMPLE[path!(servers.alpha)].into();
+    let server: Server = TomlExample[path!(servers.alpha)].into();
     println!("{server:?}");
 
     // We can even compose with other containers!
-    let servers: std::collections::BTreeMap<String, Server> = TOML_EXAMPLE[path!(servers)].into();
+    let servers: std::collections::BTreeMap<String, Server> = TomlExample[path!(servers)].into();
     println!("{servers:?}");
 
     // Fields do not need to fully match. We only require all keys show up in the source data.
@@ -120,7 +118,7 @@ fn user_types() {
     struct PartialServer<'a> {
         ip: &'a str,
     }
-    let partial_server: PartialServer<'_> = TOML_EXAMPLE[path!(servers.alpha)].into();
+    let partial_server: PartialServer<'_> = TomlExample[path!(servers.alpha)].into();
     println!("{partial_server:?}");
 
     // Field renaming supported. Needed if the key is not a valid rust identifier.
@@ -131,7 +129,7 @@ fn user_types() {
         date_of_birth: S, // matches "date-of-birth"
         r#mod: S, // matches "mod"
     }
-    let owner: Owner<String> = TOML_EXAMPLE[path!(owner)].into();
+    let owner: Owner<String> = TomlExample[path!(owner)].into();
     println!("{owner:?}");
 
     // Nesting supported.
@@ -141,13 +139,13 @@ fn user_types() {
         owner: Owner<String>,
     }
     // An empty path fetches data at the root.
-    let root: Root = TOML_EXAMPLE[path!()].into();
+    let root: Root = TomlExample[path!()].into();
     println!("{root:?}");
 
     // Unnamed structs corresponds to arrays.
     #[derive(ConfigData, Debug)]
     struct Hosts(String, String);
-    let hosts: Hosts = TOML_EXAMPLE[path!(clients.hosts)].into();
+    let hosts: Hosts = TomlExample[path!(clients.hosts)].into();
     println!("{hosts:?}");
 }
 

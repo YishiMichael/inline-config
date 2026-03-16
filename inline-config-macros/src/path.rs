@@ -4,47 +4,6 @@ pub enum Key {
     Name(String),
 }
 
-impl Key {
-    pub fn index_ty(index: usize) -> syn::Type {
-        syn::parse_quote! {
-            ::inline_config::__private::KeyIndex<#index>
-        }
-    }
-
-    pub fn name_ty(name: &str) -> syn::Type {
-        // Referenced from frunk_proc_macro_helpers/lib.rs
-        let tys = name.trim().chars().map(|c| -> syn::Type {
-            match c {
-                'A'..='Z' | 'a'..='z' => {
-                    let ident = quote::format_ident!("{c}");
-                    syn::parse_quote! {
-                        ::inline_config::__private::chars::#ident
-                    }
-                }
-                '0'..='9' | '_' => {
-                    let ident = quote::format_ident!("_{c}");
-                    syn::parse_quote! {
-                        ::inline_config::__private::chars::#ident
-                    }
-                }
-                c => syn::parse_quote! {
-                    ::inline_config::__private::chars::Ch<#c>
-                },
-            }
-        });
-        syn::parse_quote! {
-            ::inline_config::__private::KeyName<(#(#tys,)*)>
-        }
-    }
-
-    fn ty(self) -> syn::Type {
-        match self {
-            Self::Index(index) => Self::index_ty(index),
-            Self::Name(name) => Self::name_ty(&name),
-        }
-    }
-}
-
 impl syn::parse::Parse for Key {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         if input.peek(syn::LitInt) {
@@ -65,52 +24,71 @@ impl syn::parse::Parse for Key {
     }
 }
 
-#[derive(Clone)]
-pub enum Path {
-    Nil,
-    LCons(Key, Box<Self>),
-    RCons(Box<Self>, Key),
+impl quote::ToTokens for Key {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        match self {
+            Self::Index(index) => quote::quote! {
+                ::inline_config::__private::KeyIndex<#index>
+            }
+            .to_tokens(tokens),
+            Self::Name(name) => {
+                // Referenced from frunk_proc_macro_helpers/lib.rs
+                let tys = name.trim().chars().map(|c| -> syn::Type {
+                    match c {
+                        'A'..='Z' | 'a'..='z' => {
+                            let ident = quote::format_ident!("{c}");
+                            syn::parse_quote! {
+                                ::inline_config::__private::chars::#ident
+                            }
+                        }
+                        '0'..='9' | '_' => {
+                            let ident = quote::format_ident!("_{c}");
+                            syn::parse_quote! {
+                                ::inline_config::__private::chars::#ident
+                            }
+                        }
+                        c => syn::parse_quote! {
+                            ::inline_config::__private::chars::Ch<#c>
+                        },
+                    }
+                });
+                quote::quote! {
+                    ::inline_config::__private::KeyName<(#(#tys,)*)>
+                }
+                .to_tokens(tokens);
+            }
+        }
+    }
+}
+
+#[derive(Clone, Default)]
+pub struct Path {
+    keys: Vec<Key>,
 }
 
 impl Path {
-    pub fn nil() -> Self {
-        Self::Nil
-    }
+    // pub fn left_cons(self, key: Key) -> Self {
+    //     Self::LCons(key, Box::new(self))
+    // }
 
-    pub fn left_cons(self, key: Key) -> Self {
-        Self::LCons(key, Box::new(self))
-    }
+    // pub fn right_cons(self, key: Key) -> Self {
+    //     Self::RCons(Box::new(self), key)
+    // }
 
-    pub fn right_cons(self, key: Key) -> Self {
-        Self::RCons(Box::new(self), key)
+    pub fn append(mut self, key: Key) -> Self {
+        self.keys.push(key);
+        self
     }
 
     pub fn ty(self) -> syn::Type {
-        match self {
-            Self::Nil => syn::parse_quote! {
-                ::inline_config::__private::PathNil
-            },
-            Self::LCons(key, path) => {
-                let key_ty = key.ty();
-                let path_ty = path.ty();
-                syn::parse_quote! {
-                    ::inline_config::__private::PathLCons<#key_ty, #path_ty>
-                }
-            }
-            Self::RCons(path, key) => {
-                let path_ty = path.ty();
-                let key_ty = key.ty();
-                syn::parse_quote! {
-                    ::inline_config::__private::PathRCons<#path_ty, #key_ty>
-                }
-            }
+        syn::parse_quote! {
+            #self
         }
     }
 
     pub fn expr(self) -> syn::Expr {
-        let ty = self.ty();
         syn::parse_quote! {
-            <#ty>::default()
+            <#self>::default()
         }
     }
 }
@@ -118,11 +96,33 @@ impl Path {
 impl syn::parse::Parse for Path {
     fn parse(input: syn::parse::ParseStream) -> syn::Result<Self> {
         Ok(if input.is_empty() {
-            Self::nil()
+            Self::default()
         } else {
-            syn::punctuated::Punctuated::<Key, syn::Token![.]>::parse_separated_nonempty(input)?
+            Self {
+                keys: syn::punctuated::Punctuated::<Key, syn::Token![.]>::parse_separated_nonempty(
+                    input,
+                )?
                 .into_iter()
-                .rfold(Self::nil(), |path, key| path.left_cons(key))
+                .collect(),
+            }
         })
+    }
+}
+
+impl quote::ToTokens for Path {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        self.keys
+            .iter()
+            .rfold(
+                quote::quote! {
+                    ::inline_config::__private::PathNil
+                },
+                |path, key| {
+                    quote::quote! {
+                        ::inline_config::__private::PathCons<#key, #path>
+                    }
+                },
+            )
+            .to_tokens(tokens)
     }
 }

@@ -1,7 +1,7 @@
 #[cfg(feature = "indexmap")]
-type Map<K, V> = indexmap::IndexMap<K, V>;
+pub(crate) type Map<K, V> = indexmap::IndexMap<K, V>;
 #[cfg(not(feature = "indexmap"))]
-type Map<K, V> = std::collections::BTreeMap<K, V>;
+pub(crate) type Map<K, V> = std::collections::BTreeMap<K, V>;
 
 pub enum Value {
     Nil,

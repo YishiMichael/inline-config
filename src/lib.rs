@@ -145,18 +145,15 @@ pub mod __private {
     pub struct PathNil;
 
     #[derive(Default)]
-    pub struct PathLCons<K, P>(K, P);
-
-    #[derive(Default)]
-    pub struct PathRCons<P, K>(P, K);
+    pub struct PathCons<K, P>(K, P);
 
     // trait PathAppend<TK> {
     //     type Output;
     // }
 
-    trait PathExtend<TP> {
-        type Output;
-    }
+    // pub trait PathExtend<TP> {
+    //     type Output;
+    // }
 
     // impl<TK> PathAppend<TK> for PathNil {
     //     type Output = PathCons<TK, PathNil>;
@@ -169,19 +166,19 @@ pub mod __private {
     //     type Output = PathCons<K, <P as PathAppend<TK>>::Output>;
     // }
 
-    impl<P> PathExtend<PathNil> for P {
-        type Output = P;
-    }
+    // impl<P> PathExtend<PathNil> for P {
+    //     type Output = P;
+    // }
 
-    impl<LP, K, RP> PathExtend<PathLCons<K, RP>> for LP
-    where
-        PathRCons<LP, K>: PathExtend<RP>,
-    {
-        type Output = <PathRCons<LP, K> as PathExtend<RP>>::Output;
-    }
+    // impl<LP, K, RP> PathExtend<PathLCons<K, RP>> for LP
+    // where
+    //     PathRCons<LP, K>: PathExtend<RP>,
+    // {
+    //     type Output = <PathRCons<LP, K> as PathExtend<RP>>::Output;
+    // }
 
-    #[derive(Clone, Copy)]
-    pub struct Config<M, P>(PhantomData<(M, P)>);
+    // #[derive(Clone, Copy)]
+    // pub struct Indexed<C, P>(PhantomData<(C, P)>);
 
     // impl<M, P> Default for Config<M, P> {
     //     fn default() -> Self {
@@ -195,14 +192,22 @@ pub mod __private {
     //     }
     // }
 
-    impl<M, P, I> std::ops::Index<I> for Config<M, P>
-    where
-        P: PathExtend<I>,
-    {
-        type Output = Config<M, <P as PathExtend<I>>::Output>;
+    // impl<C, PA> std::ops::Index<PathNil> for Indexed<C, PA> {
+    //     type Output = Indexed<C, PA>;
 
-        fn index(&self, _index: PathCons<K, KS>) -> &Self::Output {
-            &Config(PhantomData)
-        }
-    }
+    //     fn index(&self, _index: PathNil) -> &Self::Output {
+    //         &Indexed(PhantomData)
+    //     }
+    // }
+
+    // impl<C, PA, PB, K, PAB> std::ops::Index<PathCons<PB, K>> for Indexed<C, PA>
+    // where
+    //     Indexed<C, PA>: std::ops::Index<PB, Output = Indexed<C, PAB>>,
+    // {
+    //     type Output = Indexed<C, PathCons<PAB, K>>;
+
+    //     fn index(&self, _index: PathCons<PB, K>) -> &Self::Output {
+    //         &Indexed(PhantomData)
+    //     }
+    // }
 }

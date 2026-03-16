@@ -3,8 +3,8 @@
 //! [`inline_config`]: https://docs.rs/inline-config/latest/inline_config/
 
 mod config;
-mod config_data;
 mod format;
+mod from_config;
 mod path;
 mod value;
 
@@ -63,15 +63,9 @@ fn emit_tokens_or_error<T: quote::ToTokens>(result: syn::Result<T>) -> proc_macr
 ///
 /// [`proc_macro_expand`]: https://github.com/rust-lang/rust/issues/90765
 /// [`macro_string`]: https://docs.rs/macro-string/latest/macro_string/
-#[proc_macro_attribute]
-pub fn config(
-    input: proc_macro::TokenStream,
-    item: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    emit_tokens_or_error(
-        syn::parse(input)
-            .and_then(|input| syn::parse(item).and_then(|item| config::config(input, item))),
-    )
+#[proc_macro_derive(Config, attributes(config))]
+pub fn config(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    emit_tokens_or_error(syn::parse(item).and_then(config::config))
 }
 
 /// Defines a data structure that can be converted directly from a compatible container.
@@ -80,7 +74,7 @@ pub fn config(
 /// Use structs with unnamed fields to access from arrays; use structs with named fields to access from tables.
 /// The fields do not necessarily need to be "full" - it may only contain a subset of fields in source data.
 ///
-/// To avoid non-identifier key names occurred in source config (e.g. contains `-`), use `#[config_data(rename = "...")]` on certain fields.
+/// To avoid non-identifier key names occurred in source config (e.g. contains `-`), use `#[from_config(rename = "...")]` on certain fields.
 ///
 /// ```
 /// use inline_config::ConfigData;
@@ -88,14 +82,14 @@ pub fn config(
 /// #[derive(ConfigData)]
 /// struct MyStruct {
 ///     name: String, // matches "name"
-///     #[config_data(rename = "date-of-birth")]
+///     #[from_config(rename = "date-of-birth")]
 ///     date_of_birth: String, // matches "date-of-birth"
 ///     r#mod: String, // matches "mod"
 /// }
 /// ```
-#[proc_macro_derive(ConfigData, attributes(config_data))]
-pub fn config_data(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    emit_tokens_or_error(syn::parse(item).and_then(config_data::config_data))
+#[proc_macro_derive(ConfigData, attributes(from_config))]
+pub fn from_config(item: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    emit_tokens_or_error(syn::parse(item).and_then(from_config::from_config))
 }
 
 /// Constructs a path with which one accesses a nested-in piece of data from config.

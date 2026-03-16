@@ -1,454 +1,767 @@
+use crate::format::Format;
 use crate::path::Key;
-use crate::value::Value;
-use darling::FromMeta;
+use crate::value::{Map, Value};
 
-#[derive(FromMeta)]
-#[darling(derive_syn_parse)]
-pub struct ConfigArgs {
-    #[darling(default)]
-    export: ExportSettings,
+// #[derive(FromMeta)]
+// struct Sources {
+//     #[darling(multiple)]
+//     config: Vec<Value>,
+// }
+
+pub struct ConfigItem {
+    ident: syn::Ident,
+    value: Value,
+    // #[darling(map = accumulate)]
+    // #[darling(flatten)]
+    // sources: Sources,
 }
 
-#[derive(Default, FromMeta)]
-struct ExportSettings {
-    #[darling(rename = "type")]
-    r#type: Option<syn::Ident>,
-    #[darling(rename = "const")]
-    r#const: Option<syn::Ident>,
-    #[darling(rename = "static")]
-    r#static: Option<syn::Ident>,
-}
-
-pub struct ConfigTokenItems {
-    item_mod: syn::ItemMod,
-    export_item_type: Option<syn::ItemType>,
-    export_item_const: Option<syn::ItemConst>,
-    export_item_static: Option<syn::ItemStatic>,
-}
-
-impl quote::ToTokens for ConfigTokenItems {
-    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
-        self.item_mod.to_tokens(tokens);
-        self.export_item_type.to_tokens(tokens);
-        self.export_item_const.to_tokens(tokens);
-        self.export_item_static.to_tokens(tokens);
-    }
-}
-
-pub fn config(args: ConfigArgs, item: syn::ItemMod) -> syn::Result<ConfigTokenItems> {
-    let syn::ItemMod {
-        attrs,
-        vis,
-        ident,
-        content,
-        ..
-    } = item;
-    let (brace, items) = content.ok_or(syn::Error::new_spanned(&ident, "no sources found"))?;
-    if items.is_empty() {
-        return Err(syn::Error::new(
-            syn::spanned::Spanned::span(&brace.span),
-            "no sources found",
-        ));
-    }
-    let value = items
+pub fn config(item: syn::ItemStruct) -> syn::Result<ConfigItem> {
+    let mut errors = darling::Error::accumulator();
+    let value = item
+        .attrs
         .into_iter()
-        .map(|item| match item {
-            syn::Item::Macro(syn::ItemMacro {
-                mac: syn::Macro { path, tokens, .. },
-                ..
-            }) => {
-                let format = Format::from_str(&path.require_ident()?.to_string())
-                    .ok_or(syn::Error::new_spanned(&path, "format not supported"))?;
-                let source: macro_string::MacroString = syn::parse2(tokens)?;
-                format.parse(&source.eval()?).map_err(|e| source.error(e))
-            }
-            item => Err(syn::Error::new_spanned(&item, "expecting macro"))?,
+        .filter(|attr| attr.path().is_ident("config"))
+        .filter_map(|attr| {
+            errors.handle_in(|| {
+                let meta_list: syn::MetaList =
+                    syn::parse2(attr.meta.require_list()?.tokens.clone())?;
+                let format = Format::from_str(&meta_list.path.require_ident()?.to_string()).ok_or(
+                    syn::Error::new_spanned(&meta_list.path, "format not supported"),
+                )?;
+                let source: macro_string::MacroString = syn::parse2(meta_list.tokens.clone())?;
+                let value = format.parse(&source.eval()?).map_err(|e| source.error(e))?;
+                Ok(value)
+            })
         })
-        .sum::<syn::Result<_>>()?;
-
-    let (ty, item_mod) = ModItems::from_value(&value).encapsulate(ident);
-    Ok(ConfigTokenItems {
-        item_mod: syn::ItemMod {
-            attrs,
-            vis,
-            ..item_mod
-        },
-        export_item_type: args.export.r#type.map(|ident| {
-            syn::parse_quote! {
-                pub type #ident = #ty;
-            }
-        }),
-        export_item_const: args.export.r#const.map(|ident| {
-            syn::parse_quote! {
-                pub const #ident: #ty = #ty;
-            }
-        }),
-        export_item_static: args.export.r#static.map(|ident| {
-            syn::parse_quote! {
-                pub static #ident: #ty = #ty;
-            }
-        }),
+        .sum();
+    errors.finish()?;
+    Ok(ConfigItem {
+        ident: item.ident,
+        value,
     })
 }
 
-struct PrimitiveConvertItem<V> {
-    ty_fn: fn() -> syn::Type,
-    expr_fn: fn(&V) -> syn::Expr,
+impl quote::ToTokens for ConfigItem {
+    fn to_tokens(&self, tokens: &mut proc_macro2::TokenStream) {
+        self.value.to_item_const(&self.ident).to_tokens(tokens);
+        // let path_nil = &Path::default();
+        // let ident = &self.ident;
+        // quote::quote! {
+        //     impl std::ops::Deref for #ident {
+        //         type Target = ::inline_config::__private::Config<#ident, #path_nil>;
+
+        //         fn deref(&self) -> &Self::Target {
+        //             &::inline_config::__private::Config(::std::marker::PhantomData)
+        //         }
+        //     }
+        // }
+        // .to_tokens(tokens);
+        // impls_from_value(&self.value, ident, path_nil)
+        //     .iter()
+        //     .for_each(|item_impl| item_impl.to_tokens(tokens));
+    }
 }
 
-struct ContainerConvertItem<T> {
-    ty_fn: fn(&syn::Ident) -> syn::Type,
-    expr_fn: fn(&[T], &[syn::Expr]) -> syn::Expr,
+// pub fn config(item: syn::DeriveInput) -> syn::Result<ConfigTokenItems> {
+//     let ConfigItem { ident, sources } = ConfigItem::from_derive_input(&item)?;
+//     Ok(ConfigTokenItems {
+//         item_impl_deref: ,
+//         item_impls_from: ,
+//     })
+// }
+
+// struct ModStructure {
+//     ty: syn::Ident,
+//     item_impls_from: Vec<syn::ItemImpl>,
+//     item_impls_index: Vec<syn::ItemImpl>,
+//     item_mods: Vec<syn::ItemMod>,
+// }
+
+struct ConvertImpl {
+    ty: syn::Type,
+    expr: syn::Expr,
+    generics: syn::Generics,
 }
 
-struct ModItems {
-    item_struct: syn::ItemStruct,
-    item_impl_default: syn::ItemImpl,
-    item_impls_index_key: Vec<syn::ItemImpl>,
-    item_impls_index_path_nil: syn::ItemImpl,
-    item_impls_index_path_cons: syn::ItemImpl,
-    item_impls_from_primitive: Vec<syn::ItemImpl>,
-    item_impls_from_container: Vec<syn::ItemImpl>,
-    item_mods: Vec<syn::ItemMod>,
-}
-
-struct __A<T> {
-    t: T,
-}
-
-static A: __A<()> = __A { t: () };
-
-type A = __A<()>;
-
-macro_rules! toml {
-    ($($_:tt)*) => {
-        i32
-    };
-}
-
-pub struct Abc(
-    toml!(
-        r#"
-        title = "TOML Example"
-
-        [owner]
-        name = "Tom Preston-Werner"
-        dob = "1979-05-27"
-        date-of-birth = "1979-05-27"
-        mod = "toml"
-
-        [database]
-        server = "192.168.1.1"
-        ports = [ 8000, 8001, 8002 ]
-        connection_max = 5000
-        enabled = true
-
-        [servers.alpha]
-        ip = "10.0.0.1"
-        dc = "eqdc10"
-
-        [servers.beta]
-        ip = "10.0.0.2"
-        dc = "eqdc10"
-
-        [clients]
-        data = [ ["gamma", "delta"], [1, 2] ]
-        hosts = [
-          "alpha",
-          "omega"
-        ]
-
-        [languages]
-        json = 2001
-        yaml = 2001
-        toml = 2013
-        "#
-    ),
-);
-
-impl ModItems {
-    fn from_nil() -> Self {
-        Self::from_general(
-            &(),
-            |_| Vec::new(),
-            |_: &std::convert::Infallible| unreachable!(),
-            [],
-            [],
-        )
+trait ValueVariant {
+    fn convert_impls(
+        &self,
+        _children_tys: &[syn::Type],
+        _children_exprs: &[syn::Expr],
+    ) -> Vec<ConvertImpl> {
+        Vec::new()
     }
 
-    fn from_primitive<V, const PN: usize>(
-        value: &V,
-        primitive_convert_items: [PrimitiveConvertItem<V>; PN],
-    ) -> Self {
-        Self::from_general(
-            value,
-            |_| Vec::new(),
-            |_: &std::convert::Infallible| unreachable!(),
-            primitive_convert_items,
-            [],
-        )
+    fn children(&self) -> Vec<(Key, &Value)> {
+        Vec::new()
     }
 
-    fn from_container<'v, V, T: 'v, const CN: usize>(
-        value: &'v V,
-        field_iter: fn(&'v V) -> Vec<(T, &'v Value)>,
-        key_ty_fn: fn(&T) -> syn::Type,
-        container_convert_items: [ContainerConvertItem<T>; CN],
-    ) -> Self {
-        Self::from_general(value, field_iter, key_ty_fn, [], container_convert_items)
-    }
-
-    fn from_general<'v, V, T: 'v, const PN: usize, const CN: usize>(
-        value: &'v V,
-        field_iter: fn(&'v V) -> Vec<(T, &'v Value)>,
-        key_ty_fn: fn(&T) -> syn::Type,
-        primitive_convert_items: [PrimitiveConvertItem<V>; PN],
-        container_convert_items: [ContainerConvertItem<T>; CN],
-    ) -> ModItems {
-        let (tags, values): (Vec<_>, Vec<_>) = field_iter(value).into_iter().unzip();
-        let (field_tys, item_mods): (Vec<_>, Vec<_>) = values
-            .into_iter()
+    fn to_item_const(&self, ident: &syn::Ident) -> syn::ItemConst {
+        let ((children_tys, children_exprs), (item_impls_index, item_mods)): (
+            (Vec<syn::Type>, Vec<syn::Expr>),
+            (Vec<syn::ItemImpl>, Vec<syn::ItemMod>),
+        ) = self
+            .children()
+            .iter()
             .enumerate()
-            .map(|(index, value)| {
-                Self::from_value(value).encapsulate(quote::format_ident!("_{index}"))
-            })
-            .unzip();
-        let item_impls_index_key = tags
-            .iter()
-            .map(key_ty_fn)
-            .zip(field_tys.iter())
-            .map(|(key_ty, field_ty)| {
-                syn::parse_quote! {
-                    impl ::std::ops::Index<#key_ty> for Type {
-                        type Output = #field_ty;
-
-                        fn index(&self, _index: #key_ty) -> &Self::Output {
-                            &#field_ty
-                        }
-                    }
-                }
-            })
-            .collect();
-        let item_impls_index_path_nil = syn::parse_quote! {
-            impl ::std::ops::Index<::inline_config::__private::PathNil> for Type {
-                type Output = Type;
-
-                fn index(&self, _index: ::inline_config::__private::PathNil) -> &Self::Output {
-                    <&Type as Default>::default()
-                }
-            }
-        };
-        let item_impls_index_path_cons = syn::parse_quote! {
-            impl<K, KS> ::std::ops::Index<::inline_config::__private::PathCons<K, KS>> for Type
-            where
-                Type: ::std::ops::Index<K, Output: ::std::ops::Index<KS, Output: 'static>>,
-                &'static <<Type as ::std::ops::Index<K>>::Output as ::std::ops::Index<KS>>::Output: Default,
-            {
-                type Output = <<Type as ::std::ops::Index<K>>::Output as ::std::ops::Index<KS>>::Output;
-
-                fn index(&self, _index: ::inline_config::__private::PathCons<K, KS>) -> &Self::Output {
-                    <&<<Type as ::std::ops::Index<K>>::Output as ::std::ops::Index<KS>>::Output as Default>::default()
-                }
-            }
-        };
-        let item_impls_from_primitive = primitive_convert_items
-            .iter()
-            .map(|convert_item| {
-                let ty = (convert_item.ty_fn)();
-                let expr = (convert_item.expr_fn)(value);
-                syn::parse_quote! {
-                    impl From<Type> for #ty {
-                        fn from(_value: Type) -> Self {
-                            #expr
-                        }
-                    }
-                }
-            })
-            .collect();
-        let generic = syn::Ident::new("__inline_config__T", proc_macro2::Span::call_site());
-        let (where_predicates, exprs): (Vec<syn::WherePredicate>, Vec<syn::Expr>) = field_tys
-            .iter()
-            .map(|field_ty| {
-                (
-                    syn::parse_quote! {
-                        #field_ty: Default + Into<#generic>
-                    },
-                    syn::parse_quote! {
-                        <#field_ty as Into<#generic>>::into(<#field_ty as Default>::default())
-                    },
-                )
-            })
-            .unzip();
-        let item_impls_from_container = container_convert_items
-            .iter()
-            .map(|convert_item| {
-                let ty = (convert_item.ty_fn)(&generic);
-                let expr = (convert_item.expr_fn)(&tags, &exprs);
-                syn::parse_quote! {
-                    impl<#generic> From<Type> for #ty
+            .map(|(index, (key, value))| {
+                let mod_ident = quote::format_ident!("_{index}");
+                let child_ident = quote::format_ident!("Type");
+                let item_const = value.to_item_const(&child_ident);
+                let child_ty = syn::parse_quote! {
+                    #mod_ident::#child_ident
+                };
+                let child_expr = syn::parse_quote! {
+                    #mod_ident::#child_ident
+                };
+                let item_impl_index = syn::parse_quote! {
+                    impl<P> ::std::ops::Index<::inline_config::__private::PathCons<#key, P>> for #ident
                     where
-                        #(#where_predicates,)*
+                        #child_ty: ::std::ops::Index<P>,
+                        &'static <#child_ty as ::std::ops::Index<P>>::Output: Default,
                     {
-                        fn from(_value: Type) -> Self {
+                        type Output = <#child_ty as ::std::ops::Index<P>>::Output;
+
+                        fn index(&self, _index: ::inline_config::__private::PathCons<#key, P>) -> &Self::Output {
+                            <&<#child_ty as ::std::ops::Index<P>>::Output as Default>::default()
+                        }
+                    }
+                };
+                let item_mod = syn::parse_quote! {
+                    pub mod #mod_ident {
+                        pub struct #child_ident;
+
+                        #item_const
+                    }
+                };
+                ((child_ty, child_expr), (item_impl_index, item_mod))
+            })
+            .unzip();
+        let item_impls_from: Vec<syn::ItemImpl> = self
+            .convert_impls(&children_tys, &children_exprs)
+            .into_iter()
+            .map(|from_impl| {
+                let ty = from_impl.ty;
+                let expr = from_impl.expr;
+                let (impl_generics, _, where_clause) = from_impl.generics.split_for_impl();
+                syn::parse_quote! {
+                    impl #impl_generics From<#ident> for #ty #where_clause {
+                        fn from(_value: #ident) -> Self {
                             #expr
                         }
                     }
                 }
             })
             .collect();
-        Self {
-            item_struct: syn::parse_quote! {
-                #[derive(Clone, Copy, Default)]
-                pub struct Type;
-            },
-            item_impl_default: syn::parse_quote! {
-                impl Default for &Type {
-                    fn default() -> Self {
-                        &Type
+        syn::parse_quote! {
+            const _: () = {
+                impl Default for &#ident {
+                    fn default() -> &#ident {
+                        &#ident
                     }
                 }
-            },
-            item_impls_index_key,
-            item_impls_index_path_nil,
-            item_impls_index_path_cons,
-            item_impls_from_primitive,
-            item_impls_from_container,
-            item_mods,
+
+                #(#item_impls_from)*
+
+                impl ::std::ops::Index<::inline_config::__private::PathNil> for #ident {
+                    type Output = #ident;
+
+                    fn index(&self, _index: ::inline_config::__private::PathNil) -> &Self::Output {
+                        &#ident
+                    }
+                }
+
+                #(#item_impls_index)*
+
+                #(#item_mods)*
+            };
+        }
+    }
+}
+
+impl ValueVariant for Value {
+    fn convert_impls(
+        &self,
+        children_tys: &[syn::Type],
+        children_exprs: &[syn::Expr],
+    ) -> Vec<ConvertImpl> {
+        match self {
+            Self::Nil => ().convert_impls(children_tys, children_exprs),
+            Self::Boolean(value) => value.convert_impls(children_tys, children_exprs),
+            Self::PosInt(value) => value.convert_impls(children_tys, children_exprs),
+            Self::NegInt(value) => value.convert_impls(children_tys, children_exprs),
+            Self::Float(value) => value.convert_impls(children_tys, children_exprs),
+            Self::String(value) => value.convert_impls(children_tys, children_exprs),
+            Self::Array(value) => value.convert_impls(children_tys, children_exprs),
+            Self::Table(value) => value.convert_impls(children_tys, children_exprs),
         }
     }
 
-    fn from_value(value: &Value) -> Self {
-        macro_rules! numeric_convert_item {
+    fn children(&self) -> Vec<(Key, &Value)> {
+        match self {
+            Self::Nil => ().children(),
+            Self::Boolean(value) => value.children(),
+            Self::PosInt(value) => value.children(),
+            Self::NegInt(value) => value.children(),
+            Self::Float(value) => value.children(),
+            Self::String(value) => value.children(),
+            Self::Array(value) => value.children(),
+            Self::Table(value) => value.children(),
+        }
+    }
+}
+
+impl ValueVariant for () {}
+
+impl ValueVariant for bool {
+    fn convert_impls(
+        &self,
+        _children_tys: &[syn::Type],
+        _children_exprs: &[syn::Expr],
+    ) -> Vec<ConvertImpl> {
+        [ConvertImpl {
+            ty: syn::parse_quote! { bool },
+            expr: syn::parse_quote! { #self },
+            generics: syn::Generics::default(),
+        }]
+        .into()
+    }
+}
+
+impl ValueVariant for u64 {
+    fn convert_impls(
+        &self,
+        _children_tys: &[syn::Type],
+        _children_exprs: &[syn::Expr],
+    ) -> Vec<ConvertImpl> {
+        macro_rules! cast_impl {
             ($ty:ty) => {
-                PrimitiveConvertItem {
-                    ty_fn: || syn::parse_quote! { $ty },
-                    expr_fn: |expr| syn::parse_quote! { #expr as $ty },
+                ConvertImpl {
+                    ty: syn::parse_quote! { $ty },
+                    expr: syn::parse_quote! { #self as $ty },
+                    generics: syn::Generics::default(),
                 }
             };
         }
-        match value {
-            Value::Nil => Self::from_nil(),
-            Value::Boolean(value) => Self::from_primitive(
-                value,
-                [PrimitiveConvertItem {
-                    ty_fn: || syn::parse_quote! { bool },
-                    expr_fn: |expr| syn::parse_quote! { #expr },
-                }],
-            ),
-            Value::PosInt(value) => Self::from_primitive(
-                value,
-                [
-                    numeric_convert_item!(u8),
-                    numeric_convert_item!(u16),
-                    numeric_convert_item!(u32),
-                    numeric_convert_item!(u64),
-                    numeric_convert_item!(u128),
-                    numeric_convert_item!(usize),
-                    numeric_convert_item!(i8),
-                    numeric_convert_item!(i16),
-                    numeric_convert_item!(i32),
-                    numeric_convert_item!(i64),
-                    numeric_convert_item!(i128),
-                    numeric_convert_item!(isize),
-                    numeric_convert_item!(f32),
-                    numeric_convert_item!(f64),
-                ],
-            ),
-            Value::NegInt(value) => Self::from_primitive(
-                value,
-                [
-                    numeric_convert_item!(i8),
-                    numeric_convert_item!(i16),
-                    numeric_convert_item!(i32),
-                    numeric_convert_item!(i64),
-                    numeric_convert_item!(i128),
-                    numeric_convert_item!(isize),
-                    numeric_convert_item!(f32),
-                    numeric_convert_item!(f64),
-                ],
-            ),
-            Value::Float(value) => Self::from_primitive(
-                value,
-                [numeric_convert_item!(f32), numeric_convert_item!(f64)],
-            ),
-            Value::String(value) => Self::from_primitive(
-                value,
-                [
-                    PrimitiveConvertItem {
-                        ty_fn: || syn::parse_quote! { &'static str },
-                        expr_fn: |expr| syn::parse_quote! { #expr },
-                    },
-                    PrimitiveConvertItem {
-                        ty_fn: || syn::parse_quote! { String },
-                        expr_fn: |expr| syn::parse_quote! { #expr.to_string() },
-                    },
-                ],
-            ),
-            Value::Array(value) => Self::from_container(
-                value,
-                |value| value.iter().enumerate().collect(),
-                |index| Key::index_ty(*index),
-                [ContainerConvertItem {
-                    ty_fn: |generic| syn::parse_quote! { Vec<#generic> },
-                    expr_fn: |_tags, exprs| syn::parse_quote! { [#(#exprs),*].into() },
-                }],
-            ),
-            Value::Table(value) => Self::from_container(
-                value,
-                |value| value.iter().collect(),
-                |name| Key::name_ty(name),
-                [
-                    ContainerConvertItem {
-                        ty_fn: |generic| syn::parse_quote! { ::std::collections::BTreeMap<&'static str, #generic> },
-                        expr_fn: |tags, exprs| syn::parse_quote! { [#((#tags, #exprs)),*].into() },
-                    },
-                    ContainerConvertItem {
-                        ty_fn: |generic| syn::parse_quote! { ::std::collections::BTreeMap<String, #generic> },
-                        expr_fn: |tags, exprs| syn::parse_quote! { [#((#tags.to_string(), #exprs)),*].into() },
-                    },
-                    #[cfg(feature = "indexmap")]
-                    ContainerConvertItem {
-                        ty_fn: |generic| syn::parse_quote! { ::indexmap::IndexMap<&'static str, #generic> },
-                        expr_fn: |tags, exprs| syn::parse_quote! { [#((#tags, #exprs)),*].into() },
-                    },
-                    #[cfg(feature = "indexmap")]
-                    ContainerConvertItem {
-                        ty_fn: |generic| syn::parse_quote! { ::indexmap::IndexMap<String, #generic> },
-                        expr_fn: |tags, exprs| syn::parse_quote! { [#((#tags.to_string(), #exprs)),*].into() },
-                    },
-                ],
-            ),
-        }
-    }
-
-    fn encapsulate(&self, mod_ident: syn::Ident) -> (syn::Type, syn::ItemMod) {
-        let Self {
-            item_struct,
-            item_impl_default,
-            item_impls_index_key,
-            item_impls_index_path_nil,
-            item_impls_index_path_cons,
-            item_impls_from_primitive,
-            item_impls_from_container,
-            item_mods,
-        } = self;
-        (
-            syn::parse_quote! {
-                #mod_ident::Type
-            },
-            syn::parse_quote! {
-                pub mod #mod_ident {
-                    #item_struct
-                    #item_impl_default
-                    #(#item_impls_index_key)*
-                    #item_impls_index_path_nil
-                    #item_impls_index_path_cons
-                    #(#item_impls_from_primitive)*
-                    #(#item_impls_from_container)*
-                    #(#item_mods)*
-                }
-            },
-        )
+        [
+            cast_impl!(u8),
+            cast_impl!(u16),
+            cast_impl!(u32),
+            cast_impl!(u64),
+            cast_impl!(u128),
+            cast_impl!(usize),
+            cast_impl!(i8),
+            cast_impl!(i16),
+            cast_impl!(i32),
+            cast_impl!(i64),
+            cast_impl!(i128),
+            cast_impl!(isize),
+            cast_impl!(f32),
+            cast_impl!(f64),
+        ]
+        .into()
     }
 }
+
+impl ValueVariant for i64 {
+    fn convert_impls(
+        &self,
+        _children_tys: &[syn::Type],
+        _children_exprs: &[syn::Expr],
+    ) -> Vec<ConvertImpl> {
+        macro_rules! cast_impl {
+            ($ty:ty) => {
+                ConvertImpl {
+                    ty: syn::parse_quote! { $ty },
+                    expr: syn::parse_quote! { #self as $ty },
+                    generics: syn::Generics::default(),
+                }
+            };
+        }
+        [
+            cast_impl!(i8),
+            cast_impl!(i16),
+            cast_impl!(i32),
+            cast_impl!(i64),
+            cast_impl!(i128),
+            cast_impl!(isize),
+            cast_impl!(f32),
+            cast_impl!(f64),
+        ]
+        .into()
+    }
+}
+
+impl ValueVariant for f64 {
+    fn convert_impls(
+        &self,
+        _children_tys: &[syn::Type],
+        _children_exprs: &[syn::Expr],
+    ) -> Vec<ConvertImpl> {
+        macro_rules! cast_impl {
+            ($ty:ty) => {
+                ConvertImpl {
+                    ty: syn::parse_quote! { $ty },
+                    expr: syn::parse_quote! { #self as $ty },
+                    generics: syn::Generics::default(),
+                }
+            };
+        }
+        [cast_impl!(f32), cast_impl!(f64)].into()
+    }
+}
+
+impl ValueVariant for String {
+    fn convert_impls(
+        &self,
+        _children_tys: &[syn::Type],
+        _children_exprs: &[syn::Expr],
+    ) -> Vec<ConvertImpl> {
+        [
+            ConvertImpl {
+                ty: syn::parse_quote! { &'static str },
+                expr: syn::parse_quote! { #self },
+                generics: syn::Generics::default(),
+            },
+            ConvertImpl {
+                ty: syn::parse_quote! { String },
+                expr: syn::parse_quote! { #self.to_string() },
+                generics: syn::Generics::default(),
+            },
+        ]
+        .into()
+    }
+}
+
+impl ValueVariant for Vec<Value> {
+    fn convert_impls(
+        &self,
+        children_tys: &[syn::Type],
+        children_exprs: &[syn::Expr],
+    ) -> Vec<ConvertImpl> {
+        [ConvertImpl {
+            ty: syn::parse_quote! { Vec<T> },
+            expr: syn::parse_quote! {
+                [#(<#children_tys as Into<T>>::into(#children_exprs)),*].into()
+            },
+            generics: syn::parse_quote! {
+                <T> where #(#children_tys: Into<T>),*
+            },
+        }]
+        .into()
+    }
+
+    fn children(&self) -> Vec<(Key, &Value)> {
+        self.iter()
+            .enumerate()
+            .map(|(index, value)| (Key::Index(index), value))
+            .collect()
+    }
+}
+
+impl ValueVariant for Map<String, Value> {
+    fn convert_impls(
+        &self,
+        children_tys: &[syn::Type],
+        children_exprs: &[syn::Expr],
+    ) -> Vec<ConvertImpl> {
+        let names: Vec<_> = self.keys().collect();
+        [
+            ConvertImpl {
+                ty: syn::parse_quote! { ::std::collections::BTreeMap<&'static str, T> },
+                expr: syn::parse_quote! {
+                    [#(#names, (<#children_tys as Into<T>>::into(#children_exprs))),*].into()
+                },
+                generics: syn::parse_quote! {
+                    <T> where #(#children_tys: Into<T>),*
+                },
+            },
+            ConvertImpl {
+                ty: syn::parse_quote! { ::std::collections::BTreeMap<String, T> },
+                expr: syn::parse_quote! {
+                    [#(#names.to_string(), (<#children_tys as Into<T>>::into(#children_exprs))),*].into()
+                },
+                generics: syn::parse_quote! {
+                    <T> where #(#children_tys: Into<T>),*
+                },
+            },
+            #[cfg(feature = "indexmap")]
+            ConvertImpl {
+                ty: syn::parse_quote! { ::indexmap::IndexMap<&'static str, T> },
+                expr: syn::parse_quote! {
+                    [#(#names, (<#children_tys as Into<T>>::into(#children_exprs))),*].into()
+                },
+                generics: syn::parse_quote! {
+                    <T> where #(#children_tys: Into<T>),*
+                },
+            },
+            #[cfg(feature = "indexmap")]
+            ConvertImpl {
+                ty: syn::parse_quote! { ::indexmap::IndexMap<String, T> },
+                expr: syn::parse_quote! {
+                    [#(#names.to_string(), (<#children_tys as Into<T>>::into(#children_exprs))),*].into()
+                },
+                generics: syn::parse_quote! {
+                    <T> where #(#children_tys: Into<T>),*
+                },
+            },
+        ].into()
+    }
+
+    fn children(&self) -> Vec<(Key, &Value)> {
+        self.iter()
+            .map(|(name, value)| (Key::Name(name.clone()), value))
+            .collect()
+    }
+}
+
+// impl<'v> NodeImpls<'v> {
+//     fn new(
+//         convert_impls: impl FnOnce(&Value, &[syn::Type], &[syn::Expr]) -> Vec<ConvertImpl> + 'static,
+//         children: impl Iterator<Item = &'v Value>,
+//     ) -> Self {
+//         Self {
+//             convert_impls: Box::new(convert_impls),
+//             children: children.collect(),
+//         }
+//     }
+
+//     fn primitive<const N: usize>(items: [(syn::Type, syn::Expr); N]) -> Self {
+//         Self::new(
+//             |_, _, _| {
+//                 Vec::from(items.map(|(ty, expr)| ConvertImpl {
+//                     ty,
+//                     expr,
+//                     generics: syn::Generics::default(),
+//                 }))
+//             },
+//             std::iter::empty(),
+//         )
+//     }
+
+//     fn from_value(value: &'v Value) -> Self {
+//         match value {
+//             Value::Nil => Self::primitive([]),
+//             Value::Boolean(value) => {
+//                 Self::primitive([(syn::parse_quote! { bool }, syn::parse_quote! { #value })])
+//             }
+//             Value::PosInt(value) => Self::primitive(
+//                 [
+//                     syn::parse_quote! { u8 },
+//                     syn::parse_quote! { u16 },
+//                     syn::parse_quote! { u32 },
+//                     syn::parse_quote! { u64 },
+//                     syn::parse_quote! { u128 },
+//                     syn::parse_quote! { usize },
+//                     syn::parse_quote! { i8 },
+//                     syn::parse_quote! { i16 },
+//                     syn::parse_quote! { i32 },
+//                     syn::parse_quote! { i64 },
+//                     syn::parse_quote! { i128 },
+//                     syn::parse_quote! { isize },
+//                     syn::parse_quote! { f32 },
+//                     syn::parse_quote! { f64 },
+//                 ]
+//                 .map(|ty: syn::Type| (ty.clone(), syn::parse_quote! { #value as #ty })),
+//             ),
+//             Value::NegInt(value) => Self::primitive(
+//                 [
+//                     syn::parse_quote! { i8 },
+//                     syn::parse_quote! { i16 },
+//                     syn::parse_quote! { i32 },
+//                     syn::parse_quote! { i64 },
+//                     syn::parse_quote! { i128 },
+//                     syn::parse_quote! { isize },
+//                     syn::parse_quote! { f32 },
+//                     syn::parse_quote! { f64 },
+//                 ]
+//                 .map(|ty: syn::Type| (ty.clone(), syn::parse_quote! { #value as #ty })),
+//             ),
+//             Value::Float(value) => Self::primitive(
+//                 [syn::parse_quote! { f32 }, syn::parse_quote! { f64 }]
+//                     .map(|ty: syn::Type| (ty.clone(), syn::parse_quote! { #value as #ty })),
+//             ),
+//             Value::String(value) => Self::primitive([
+//                 (
+//                     syn::parse_quote! { &'static str },
+//                     syn::parse_quote! { #value },
+//                 ),
+//                 (
+//                     syn::parse_quote! { String },
+//                     syn::parse_quote! { #value.to_string() },
+//                 ),
+//             ]),
+//             Value::Array(value) => Self::new(
+//                 |_, children_tys, children_exprs| {
+//                     Vec::from([ConvertImpl {
+//                         ty: syn::parse_quote! { Vec<T> },
+//                         expr: syn::parse_quote! {
+//                             [#(<#children_tys as Into<T>>::into(#children_exprs)),*].into()
+//                         },
+//                         generics: syn::parse_quote! {
+//                             <T> where #(#children_tys: Into<T>),*
+//                         },
+//                     }])
+//                 },
+//                 value.iter(),
+//             ),
+//             Value::Table(value) => Self::new(
+//                 |value, children_tys, children_exprs| {
+//                     let names = &value.keys();
+//                     Vec::from([
+//                         ConvertImpl {
+//                             ty: syn::parse_quote! { ::std::collections::BTreeMap<&'static str, T> },
+//                             expr: syn::parse_quote! {
+//                                 [#(#names, (<#children_tys as Into<T>>::into(#children_exprs))),*].into()
+//                             },
+//                             generics: syn::parse_quote! {
+//                                 <T> where #(#children_tys: Into<T>),*
+//                             },
+//                         },
+//                         ConvertImpl {
+//                             ty: syn::parse_quote! { ::std::collections::BTreeMap<String, T> },
+//                             expr: syn::parse_quote! {
+//                                 [#(#names.to_string(), (<#children_tys as Into<T>>::into(#children_exprs))),*].into()
+//                             },
+//                             generics: syn::parse_quote! {
+//                                 <T> where #(#children_tys: Into<T>),*
+//                             },
+//                         },
+//                         #[cfg(feature = "indexmap")]
+//                         ConvertImpl {
+//                             ty: syn::parse_quote! { ::indexmap::IndexMap<&'static str, T> },
+//                             expr: syn::parse_quote! {
+//                                 [#(#names, (<#children_tys as Into<T>>::into(#children_exprs))),*].into()
+//                             },
+//                             generics: syn::parse_quote! {
+//                                 <T> where #(#children_tys: Into<T>),*
+//                             },
+//                         },
+//                         #[cfg(feature = "indexmap")]
+//                         ConvertImpl {
+//                             ty: syn::parse_quote! { ::indexmap::IndexMap<String, T> },
+//                             expr: syn::parse_quote! {
+//                                 [#(#names.to_string(), (<#children_tys as Into<T>>::into(#children_exprs))),*].into()
+//                             },
+//                             generics: syn::parse_quote! {
+//                                 <T> where #(#children_tys: Into<T>),*
+//                             },
+//                         },
+//                     ])
+//                 },
+//                 value.values(),
+//             ),
+//         }
+//     }
+// }
+
+// fn impls_from_value(value: &Value, ident: &syn::Ident) -> syn::ItemConst {
+//     impl<V> NodeImplementor<V> {
+//         fn primitive(items: Vec<(syn::Type, fn(&V) -> syn::Expr)>) -> Self {
+//             Self {
+//                 // from_implementors:
+//                 fields: |_| Vec::new(),
+//             }
+//         }
+//     }
+
+//     struct PrimitiveConvertItem<V> {
+//         ty_fn: fn() -> syn::Type,
+//         expr_fn: fn(&V) -> syn::Expr,
+//     }
+
+//     struct ContainerConvertItem<T> {
+//         ty_fn: fn(&syn::Ident) -> syn::Type,
+//         expr_fn: fn(&[T], &[syn::Expr]) -> syn::Expr,
+//     }
+
+//     fn from_primitive<V, const PN: usize>(
+//         config_ident: &syn::Ident,
+//         path: &Path,
+//         value: &V,
+//         primitive_convert_items: [PrimitiveConvertItem<V>; PN],
+//     ) -> Vec<syn::ItemImpl> {
+//         primitive_convert_items
+//             .iter()
+//             .map(|convert_item| {
+//                 let ty = (convert_item.ty_fn)();
+//                 let expr = (convert_item.expr_fn)(value);
+//                 syn::parse_quote! {
+//                     impl From<::inline_config::__private::Config<#config_ident, #path>> for #ty {
+//                         fn from(_value: ::inline_config::__private::Config<#config_ident, #path>) -> Self {
+//                             #expr
+//                         }
+//                     }
+//                 }
+//             })
+//             .collect()
+//     }
+
+//     fn from_container<'v, T: 'v, const CN: usize>(
+//         config_ident: &syn::Ident,
+//         path: &Path,
+//         field_iter: impl IntoIterator<Item = (T, &'v Value)>,
+//         key_fn: fn(&T) -> Key,
+//         container_convert_items: [ContainerConvertItem<T>; CN],
+//     ) -> Vec<syn::ItemImpl> {
+//         let (tags, values): (Vec<_>, Vec<_>) = field_iter.into_iter().unzip();
+//         let t_generic = syn::Ident::new("__inline_config__T", proc_macro2::Span::call_site());
+//         let ((where_predicates, exprs), fields_impls): (
+//             (Vec<syn::WherePredicate>, Vec<syn::Expr>),
+//             Vec<_>,
+//         ) = tags
+//             .iter()
+//             .zip(values)
+//             .map(|(tag, value)| {
+//                 let field_path = path.clone().append(key_fn(tag));
+//                 (
+//                     (
+//                         syn::parse_quote! {
+//                             ::inline_config::__private::Config<#config_ident, #field_path>: Into<#t_generic>
+//                         },
+//                         syn::parse_quote! {
+//                             <::inline_config::__private::Config<#config_ident, #field_path> as Into<#t_generic>>::into(
+//                                 ::inline_config::__private::Config(::std::marker::PhantomData),
+//                             )
+//                         },
+//                     ),
+//                     impls_from_value(value, config_ident, &field_path),
+//                 )
+//             })
+//             .unzip();
+//         container_convert_items
+//             .iter()
+//             .map(|convert_item| {
+//                 let ty = (convert_item.ty_fn)(&t_generic);
+//                 let expr = (convert_item.expr_fn)(&tags, &exprs);
+//                 syn::parse_quote! {
+//                     impl<#t_generic> From<::inline_config::__private::Config<#config_ident, #path>> for #ty
+//                     where
+//                         #(#where_predicates,)*
+//                     {
+//                         fn from(_value: ::inline_config::__private::Config<#config_ident, #path>) -> Self {
+//                             #expr
+//                         }
+//                     }
+//                 }
+//             })
+//             .chain(fields_impls.into_iter().flatten())
+//             .collect()
+//     }
+
+//     macro_rules! numeric_convert_item {
+//         ($ty:ty) => {
+//             PrimitiveConvertItem {
+//                 ty_fn: || syn::parse_quote! { $ty },
+//                 expr_fn: |expr| syn::parse_quote! { #expr as $ty },
+//             }
+//         };
+//     }
+
+//     match value {
+//         Value::Nil => Vec::new(),
+//         Value::Boolean(value) => from_primitive(
+//             config_ident,
+//             path,
+//             value,
+//             [PrimitiveConvertItem {
+//                 ty_fn: || syn::parse_quote! { bool },
+//                 expr_fn: |expr| syn::parse_quote! { #expr },
+//             }],
+//         ),
+//         Value::PosInt(value) => from_primitive(
+//             config_ident,
+//             path,
+//             value,
+//             [
+//                 numeric_convert_item!(u8),
+//                 numeric_convert_item!(u16),
+//                 numeric_convert_item!(u32),
+//                 numeric_convert_item!(u64),
+//                 numeric_convert_item!(u128),
+//                 numeric_convert_item!(usize),
+//                 numeric_convert_item!(i8),
+//                 numeric_convert_item!(i16),
+//                 numeric_convert_item!(i32),
+//                 numeric_convert_item!(i64),
+//                 numeric_convert_item!(i128),
+//                 numeric_convert_item!(isize),
+//                 numeric_convert_item!(f32),
+//                 numeric_convert_item!(f64),
+//             ],
+//         ),
+//         Value::NegInt(value) => from_primitive(
+//             config_ident,
+//             path,
+//             value,
+//             [
+//                 numeric_convert_item!(i8),
+//                 numeric_convert_item!(i16),
+//                 numeric_convert_item!(i32),
+//                 numeric_convert_item!(i64),
+//                 numeric_convert_item!(i128),
+//                 numeric_convert_item!(isize),
+//                 numeric_convert_item!(f32),
+//                 numeric_convert_item!(f64),
+//             ],
+//         ),
+//         Value::Float(value) => from_primitive(
+//             config_ident,
+//             path,
+//             value,
+//             [numeric_convert_item!(f32), numeric_convert_item!(f64)],
+//         ),
+//         Value::String(value) => from_primitive(
+//             config_ident,
+//             path,
+//             value,
+//             [
+//                 PrimitiveConvertItem {
+//                     ty_fn: || syn::parse_quote! { &'static str },
+//                     expr_fn: |expr| syn::parse_quote! { #expr },
+//                 },
+//                 PrimitiveConvertItem {
+//                     ty_fn: || syn::parse_quote! { String },
+//                     expr_fn: |expr| syn::parse_quote! { #expr.to_string() },
+//                 },
+//             ],
+//         ),
+//         Value::Array(value) => from_container(
+//             config_ident,
+//             path,
+//             value.iter().enumerate(),
+//             |&index| Key::Index(index),
+//             [ContainerConvertItem {
+//                 ty_fn: |generic| syn::parse_quote! { Vec<#generic> },
+//                 expr_fn: |_tags, exprs| syn::parse_quote! { [#(#exprs),*].into() },
+//             }],
+//         ),
+//         Value::Table(value) => from_container(
+//             config_ident,
+//             path,
+//             value.iter(),
+//             |name| Key::Name(name.to_string()),
+//             [
+//                 ContainerConvertItem {
+//                     ty_fn: |generic| syn::parse_quote! { ::std::collections::BTreeMap<&'static str, #generic> },
+//                     expr_fn: |tags, exprs| syn::parse_quote! { [#((#tags, #exprs)),*].into() },
+//                 },
+//                 ContainerConvertItem {
+//                     ty_fn: |generic| syn::parse_quote! { ::std::collections::BTreeMap<String, #generic> },
+//                     expr_fn: |tags, exprs| syn::parse_quote! { [#((#tags.to_string(), #exprs)),*].into() },
+//                 },
+//                 #[cfg(feature = "indexmap")]
+//                 ContainerConvertItem {
+//                     ty_fn: |generic| syn::parse_quote! { ::indexmap::IndexMap<&'static str, #generic> },
+//                     expr_fn: |tags, exprs| syn::parse_quote! { [#((#tags, #exprs)),*].into() },
+//                 },
+//                 #[cfg(feature = "indexmap")]
+//                 ContainerConvertItem {
+//                     ty_fn: |generic| syn::parse_quote! { ::indexmap::IndexMap<String, #generic> },
+//                     expr_fn: |tags, exprs| syn::parse_quote! { [#((#tags.to_string(), #exprs)),*].into() },
+//                 },
+//             ],
+//         ),
+//     }
+// }
