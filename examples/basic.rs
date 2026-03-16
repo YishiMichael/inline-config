@@ -238,17 +238,50 @@ fn generic() {
     dbg!(names);
 }
 
+fn conditioned_src() {
+    // Use `cfg_attr` to conditionally load sources.
+    #[derive(Config)]
+    #[config(format = "toml")]
+    #[config(src = r#"
+        platform = "unknown"
+    "#)]
+    #[cfg_attr(
+        target_os = "windows",
+        config(src = r#"
+            platform = "windows"
+        "#)
+    )]
+    #[cfg_attr(
+        target_os = "macos",
+        config(src = r#"
+            platform = "macos"
+        "#)
+    )]
+    #[cfg_attr(
+        target_os = "linux",
+        config(src = r#"
+            platform = "linux"
+        "#)
+    )]
+    struct PlatformConfig;
+
+    let platform: String = PlatformConfig[path!(platform)].into();
+    dbg!(platform);
+}
+
 fn main() {
     println!("\n* primitive_types\n");
     primitive_types();
-    println!("\n* yaml_example\n");
-    yaml_example();
     println!("\n* container_types\n");
     container_types();
     println!("\n* user_types\n");
     user_types();
+    println!("\n* yaml_example\n");
+    yaml_example();
     println!("\n* overwrite\n");
     overwrite();
     println!("\n* generic\n");
     generic();
+    println!("\n* conditioned_src\n");
+    conditioned_src();
 }

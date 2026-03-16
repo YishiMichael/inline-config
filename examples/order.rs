@@ -1,4 +1,4 @@
-use inline_config::{path, Config};
+use inline_config::{Config, path};
 
 #[derive(Config)]
 #[config(format = "toml")]

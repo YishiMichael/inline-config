@@ -1,4 +1,4 @@
-use inline_config::{path, Config};
+use inline_config::{Config, path};
 
 // Include from a config file from disk.
 #[derive(Config)]
